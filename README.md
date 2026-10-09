@@ -26,11 +26,11 @@ WCAS 启动一个目标应用，并在它与合成器之间插入一个**私有 
 
 ## 与其他方案的区别
 
-| | 截图范围 | 是否需要 X11 | 是否需改动被控应用 |
-|---|---|---|---|
-| grim / spectacle / gnome-screenshot | 整屏或单窗口（依赖合成器工具） | 否 | 否 |
-| X11 + XComposite | 单窗口 | **是** | 否 |
-| **WCAS** | **被启动应用的窗口** | 否（XWayland 仅作回退） | 否，但**必须由 WCAS 启动** |
+|                                     | 截图范围                       | 是否需要 X11            | 是否需改动被控应用         |
+| ----------------------------------- | ------------------------------ | ----------------------- | -------------------------- |
+| grim / spectacle / gnome-screenshot | 整屏或单窗口（依赖合成器工具） | 否                      | 否                         |
+| X11 + XComposite                    | 单窗口                         | **是**                  | 否                         |
+| **WCAS**                            | **被启动应用的窗口**           | 否（XWayland 仅作回退） | 否，但**必须由 WCAS 启动** |
 
 关键差异：WCAS **不接管桌面上已存在的窗口**，只控制自己启动的进程树。
 这让它天然适合自动化流水线（CI、无头合成器、测试），而不会干扰用户正在使用的会话。
@@ -53,39 +53,43 @@ WCAS 启动一个目标应用，并在它与合成器之间插入一个**私有 
 
 ### 尚未完成
 
-| 能力 | 说明 |
-|---|---|
-| WinAPI 后端 | 计划中，未开始 |
-| Cocoa 后端 | 计划中，未开始 |
-| KMS 抓取 | 暂缓。现有实现依赖 libdrmtap 与 `CAP_SYS_ADMIN`，后续改为直接 DRM/KMS ioctl |
-| 后台三槽调度 | `capture_slot` / `capture_scheduler` 已实现但未接线到 `launch()` 流程 |
-| XWayland 完整回退 | `content_timeout` 未接入 capture，X11-only 客户端端到端未验证 |
-| 负向协议测试 | 未知 opcode / 版本越界 / 畸形签名 |
+| 能力              | 说明                                                                        |
+| ----------------- | --------------------------------------------------------------------------- |
+| WinAPI 后端       | 计划中，未开始                                                              |
+| Cocoa 后端        | 计划中，未开始                                                              |
+| KMS 抓取          | 暂缓。现有实现依赖 libdrmtap 与 `CAP_SYS_ADMIN`，后续改为直接 DRM/KMS ioctl |
+| 后台三槽调度      | `capture_slot` / `capture_scheduler` 已实现但未接线到 `launch()` 流程       |
+| XWayland 完整回退 | `content_timeout` 未接入 capture，X11-only 客户端端到端未验证               |
+| 负向协议测试      | 未知 opcode / 版本越界 / 畸形签名                                           |
 
 ## 架构
 
-```
-        调用方 (C++ / FFI)
-              │
-              ▼
-   ┌──────────────────────┐
-   │  ComputerUse         │  启动应用、建立私有 socket
-   │  ControlledApp       │  截图 / 输入 / 窗口选择
-   └──────────┬───────────┘
-              │  WAYLAND_DISPLAY
-              ▼
-   ┌──────────────────────┐      ┌──────────────────┐
-   │  私有 Wayland 代理    │─────▶│  真实合成器       │
-   │  (app ⇄ upstream)     │◀─────│  wayland-1        │
-   │  reactor + wire 翻译   │      └──────────────────┘
-   │  surface/buffer 观察  │
-   └──────────┬───────────┘
-              │  wl_shm / DMA-BUF
-              ▼
-   ┌──────────────────────┐
-   │  目标应用进程树        │
-   │  (主进程 + helper 进程)│
-   └──────────────────────┘
+```mermaid
+flowchart TB
+    caller["调用方<br/>C++ / FFI"]
+
+    subgraph api["WCAS API"]
+        cu["ComputerUse<br/>启动应用、建立私有 socket"]
+        ca["ControlledApp<br/>截图 / 输入 / 窗口选择"]
+    end
+
+    subgraph proxy["私有 Wayland 代理"]
+        p1["reactor + wire 翻译"]
+        p2["surface / buffer 观察"]
+    end
+
+    compositor["真实合成器<br/>wayland-1"]
+    app["目标应用进程树<br/>主进程 + helper 进程"]
+
+    caller --> cu
+    caller --> ca
+    cu -->|"启动 / 回收"| app
+    ca <-->|"WAYLAND_DISPLAY"| proxy
+    proxy <-->|"wl_display 协议"| compositor
+    app <-->|"wl_shm / DMA-BUF"| proxy
+
+    style proxy fill:#e8f0fe,stroke:#4285f4
+    style api fill:#f1f3f4,stroke:#5f6368
 ```
 
 代理的双向 ID 空间彼此独立；`new_id` 在 upstream 侧使用**恒等映射**，
@@ -159,13 +163,13 @@ app.type_text("hello");
 
 主要接口：
 
-| 分类 | 接口 |
-|---|---|
-| 生命周期 | `ComputerUse::launch`、`ControlledApp::stop`、`is_alive`、`transport` |
-| 捕获 | `capture`、`set_capture_backend`、`frame_size`、`presented_frames` |
-| 输入 | `move_mouse`、`click`、`click_with_modifiers`、`scroll`、`drag`、`press_key`、`type_text` |
-| 窗口 | `windows`、`sessions`、`select_window`、`set_capture_target` |
-| 光标 | `cursor_position` |
+| 分类     | 接口                                                                                      |
+| -------- | ----------------------------------------------------------------------------------------- |
+| 生命周期 | `ComputerUse::launch`、`ControlledApp::stop`、`is_alive`、`transport`                     |
+| 捕获     | `capture`、`set_capture_backend`、`frame_size`、`presented_frames`                        |
+| 输入     | `move_mouse`、`click`、`click_with_modifiers`、`scroll`、`drag`、`press_key`、`type_text` |
+| 窗口     | `windows`、`sessions`、`select_window`、`set_capture_target`                              |
+| 光标     | `cursor_position`                                                                         |
 
 ### 命令行
 
@@ -241,13 +245,13 @@ proton-inject*.sh     Proton / Lutris 启动包装
 
 ## 文档
 
-| 文件 | 内容 |
-|---|---|
-| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | compositor / toolkit 兼容矩阵与支持分级 |
-| [docs/Proton.md](docs/Proton.md) | Proton/Wine 游戏自动化集成指南 |
-| [docs/FFI.md](docs/FFI.md) | 从 C/Python/Node/Go/JVM 封装的 FFI 约定 |
-| [docs/SECURITY.md](docs/SECURITY.md) | 安全边界与漏洞报告方式 |
-| [docs/MAA-COMPARISON.md](docs/MAA-COMPARISON.md) | 与 MAA Linux 控制器的差异对比 |
+| 文件                                             | 内容                                    |
+| ------------------------------------------------ | --------------------------------------- |
+| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)   | compositor / toolkit 兼容矩阵与支持分级 |
+| [docs/Proton.md](docs/Proton.md)                 | Proton/Wine 游戏自动化集成指南          |
+| [docs/FFI.md](docs/FFI.md)                       | 从 C/Python/Node/Go/JVM 封装的 FFI 约定 |
+| [docs/SECURITY.md](docs/SECURITY.md)             | 安全边界与漏洞报告方式                  |
+| [docs/MAA-COMPARISON.md](docs/MAA-COMPARISON.md) | 与 MAA Linux 控制器的差异对比           |
 
 ## 许可
 
