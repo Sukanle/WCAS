@@ -251,4 +251,7 @@ proton-inject*.sh     Proton / Lutris 启动包装
 
 ## 许可
 
-尚未选择许可证。在确定之前，默认保留所有权利。
+本项目采用 [Apache License 2.0](LICENSE) 开源，Copyright 2026 Sukanle。
+
+依赖 `third_party/libdrmtap` 为独立子模块（MIT 许可证），
+在构建时以 `SHARED` 方式链接，不并入本仓库源码。
