@@ -1,0 +1,46 @@
+WCAS (Window Control Agent System)
+Copyright 2026 Sukanle
+
+This product includes software developed as part of the WCAS project
+(https://github.com/sukanle/WCAS), licensed under the Apache License,
+Version 2.0.
+
+--------------------------------------------------------------------------------
+
+Third-party components
+
+This product depends on, but does not include, the following third-party
+software. Each remains under its own license; see the corresponding project
+for the full terms.
+
+  third_party/libdrmtap (git submodule)
+    https://github.com/fxd0h/libdrmtap
+    MIT License
+    Copyright (c) 2026 libdrmtap contributors
+    Linked as a shared library at build time; source is not vendored here.
+
+--------------------------------------------------------------------------------
+
+Protocol metadata
+
+The Wayland wire protocol metadata under codegen/ is derived at build time
+from the protocol definitions distributed with the upstream projects:
+
+  wayland.xml and wayland-server-protocol.h
+    Copyright (c) 2008-2011 Kristian Høgsberg
+    Copyright (c) 2010-2011 Intel Corporation
+    Copyright (c) 2012-2013 Collabora, Ltd.
+    Licensed under the MIT License.
+
+  wayland-protocols/
+    Copyright (c) 2008-2011 Kristian Høgsberg
+    Copyright (c) 2010-2011 Intel Corporation
+    Copyright (c) 2012-2013 Collabora, Ltd.
+    Copyright (c) 2013-2014 Rafael Antognolli
+    Copyright (c) 2013-2014 Jasper St. Pierre
+    Copyright (c) 2014-2015 Olivier Frelat
+    Copyright (c) 2015-2017 Jan Arne Petersen
+    Licensed under the MIT License.
+
+Generated metadata is produced at build time and is not checked into this
+repository.
