@@ -164,6 +164,9 @@ std::vector<SessionStatus> session_status(pid_t root, const std::string &match_r
             if (!status.matched && pattern) status.matched = std::regex_search(process_text(owner), *pattern);
         }
         status.windows = proxy::list_windows(state).size();
+        const auto counters = proxy::session_counters(state);
+        status.surfaces = counters.surfaces;
+        status.toplevels = counters.toplevels;
         out.push_back(status);
         ++it;
     }

@@ -385,8 +385,11 @@ int main(int argc, char **argv) {
             } else {
                 for (std::size_t i = 0; i < wins.size(); ++i) {
                     const auto &w = wins[i];
-                    fmt::println("[{}]{} pid={} {}x{} app_id='{}' title='{}'", i, w.selected ? "*" : " ", w.pid,
-                        w.width, w.height, w.app_id, w.title);
+                    const char *origin = w.origin == WindowOrigin::Toplevel   ? "toplevel"
+                                       : w.origin == WindowOrigin::Subsurface ? "subsurface"
+                                                                              : "bare";
+                    fmt::println("[{}]{} pid={} {}x{} [{}] app_id='{}' title='{}'", i, w.selected ? "*" : " ", w.pid,
+                        w.width, w.height, origin, w.app_id, w.title);
                 }
             }
             continue;
@@ -397,7 +400,8 @@ int main(int argc, char **argv) {
                 fmt::println("no sessions");
             } else {
                 for (const auto &s : sessions) {
-                    fmt::println("pid={} connected={} matched={} windows={}", s.pid, s.connected, s.matched, s.windows);
+                    fmt::println("pid={} connected={} matched={} windows={} surfaces={} toplevels={}", s.pid,
+                        s.connected, s.matched, s.windows, s.surfaces, s.toplevels);
                 }
             }
             continue;

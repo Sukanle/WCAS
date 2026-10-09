@@ -39,6 +39,7 @@ enum class Role : uint8_t {
     Output,
     Compositor,
     Subcompositor,
+    Subsurface,
     Region,
     DataDeviceManager,
     DataDevice,
@@ -145,6 +146,27 @@ struct ToplevelState {
     std::optional<std::string> title;
 };
 
+/// Last metadata observed for a wl_surface, kept after its xdg_toplevel is
+/// destroyed. When an app closes a window but keeps rendering its surface (a
+/// popup dismissed with Escape, a toplevel recreated for the same surface), the
+/// name would otherwise vanish and the window could no longer be selected by
+/// app_id/title. This is not a ghost toplevel: it never creates a `list` entry
+/// of its own, it only lets a live rendering surface inherit a stable name.
+struct SurfaceMetadata {
+    std::optional<std::string> app_id;
+    std::optional<std::string> title;
+};
+
+/// How a listed window was discovered, so callers can tell a real toplevel
+/// from a surface that only renders content.
+enum class WindowOrigin : uint8_t {
+    Toplevel = 0,
+    /// A wl_subsurface whose metadata was inherited from an ancestor toplevel.
+    Subsurface,
+    /// Renders frames but has neither a toplevel nor a known parent.
+    Bare,
+};
+
 /// One capturable window of a session (a toplevel, or a bare committed
 /// surface). Used by the CLI `list` command and window selection.
 struct WindowInfo {
@@ -153,6 +175,7 @@ struct WindowInfo {
     std::optional<std::string> title;
     std::int32_t width = 0;
     std::int32_t height = 0;
+    WindowOrigin origin = WindowOrigin::Bare;
 };
 
 struct SurfaceState {
@@ -202,6 +225,16 @@ struct ConnState {
     std::unordered_map<std::uint32_t, std::uint32_t> xdg_surface_to_surface;
     std::unordered_map<std::uint32_t, std::uint32_t> surface_to_toplevel;
     std::unordered_map<std::uint32_t, ToplevelState> toplevels;
+    /// Last known app_id/title per surface, surviving toplevel destruction (see
+    /// SurfaceMetadata). Keyed by the surface that carried the toplevel.
+    std::unordered_map<std::uint32_t, SurfaceMetadata> surface_metadata;
+    /// `wl_subsurface` object -> the wl_surface it decorates, and the wl_surface
+    /// of the `wl_subcompositor.get_subsurface` call. A rendering surface often
+    /// never becomes a toplevel itself (games put their window content in a
+    /// subsurface), so the parent chain is what links a capturable surface back
+    /// to the toplevel that carries app_id/title.
+    std::unordered_map<std::uint32_t, std::uint32_t> subsurface_to_surface;
+    std::unordered_map<std::uint32_t, std::uint32_t> surface_to_parent_surface;
     std::optional<std::string> capture_app_id;
     std::optional<std::string> capture_title;
     /// Explicitly selected window surface (app ID). When set, both capture and
@@ -271,5 +304,15 @@ void set_capture_target(
 /// Enumerate the session's capturable windows (toplevels plus bare committed
 /// surfaces), newest metadata included. Used by `list` / window selection.
 std::vector<WindowInfo> list_windows(const std::shared_ptr<ConnState> &state);
+
+/// Cheap diagnostic counters for one session: how many wl_surface and
+/// xdg_toplevel objects are tracked at all, regardless of whether they have a
+/// committed frame. Lets `sessions` distinguish "no window exists" from
+/// "a window exists but has not rendered yet".
+struct SessionCounters {
+    std::size_t surfaces = 0;
+    std::size_t toplevels = 0;
+};
+SessionCounters session_counters(const std::shared_ptr<ConnState> &state);
 
 }   // namespace skl::wcas::proxy
