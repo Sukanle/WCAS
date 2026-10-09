@@ -88,8 +88,8 @@ flowchart TB
     proxy <-->|"wl_display 协议"| compositor
     app <-->|"wl_shm / DMA-BUF"| proxy
 
-    style proxy fill:#e8f0fe,stroke:#4285f4
-    style api fill:#f1f3f4,stroke:#5f6368
+    style proxy fill:#292A2D,stroke:#8AB4F8,color:#E8EAED
+    style api fill:#35363A,stroke:#9AA0A6,color:#E8EAED
 ```
 
 代理的双向 ID 空间彼此独立；`new_id` 在 upstream 侧使用**恒等映射**，
