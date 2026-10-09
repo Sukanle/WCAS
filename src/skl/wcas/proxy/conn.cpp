@@ -48,6 +48,7 @@ Role role_from_interface(const std::string &name) {
     if (name == "wl_output") return Role::Output;
     if (name == "wl_compositor") return Role::Compositor;
     if (name == "wl_subcompositor") return Role::Subcompositor;
+    if (name == "wl_subsurface") return Role::Subsurface;
     if (name == "wl_region") return Role::Region;
     if (name == "wl_data_device_manager") return Role::DataDeviceManager;
     if (name == "zwp_linux_dmabuf_v1") return Role::DmaBuf;
@@ -474,6 +475,16 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
     }
 
 
+    if (app_to_upstream && role == "wl_subcompositor" && opcode == 1 && words >= 3) {
+        // get_subsurface(new_id id, wl_surface surface, wl_surface parent)
+        const auto subsurface = word(msg.data() + 8);
+        const auto surface = word(msg.data() + 12);
+        const auto parent = word(msg.data() + 16);
+        if (subsurface && surface && parent) {
+            state.subsurface_to_surface[subsurface] = surface;
+            state.surface_to_parent_surface[surface] = parent;
+        }
+    }
     if (app_to_upstream && role == "xdg_wm_base" && opcode == 2) {
         const auto xdg_surface = word(msg.data() + 8);
         const auto surface = word(msg.data() + 12);
@@ -496,6 +507,15 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
                 toplevel_it->second.title = value;
             else
                 toplevel_it->second.app_id = value;
+            // Remember it against the surface too, so the name survives if the
+            // toplevel object is destroyed while the surface keeps rendering.
+            if (toplevel_it->second.surface_id) {
+                auto &meta = state.surface_metadata[toplevel_it->second.surface_id];
+                if (opcode == 2)
+                    meta.title = value;
+                else
+                    meta.app_id = value;
+            }
         }
     }
 
@@ -879,6 +899,33 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
             state.text_input_enabled = false;
             state.text_input_commit_serial = 0;
         }
+        // Window bookkeeping must be dropped with the objects it describes. Without
+        // this a closed window leaves its xdg_toplevel metadata behind forever,
+        // and `list` keeps showing a 0x0 ghost that no longer has a surface.
+        if (role_enum == Role::XdgToplevel) {
+            if (const auto it = state.toplevels.find(role_id); it != state.toplevels.end()) {
+                state.surface_to_toplevel.erase(it->second.surface_id);
+                state.toplevels.erase(it);
+            }
+        }
+        if (role_enum == Role::XdgSurface) state.xdg_surface_to_surface.erase(role_id);
+        if (role_enum == Role::Subsurface) {
+            if (const auto it = state.subsurface_to_surface.find(role_id); it != state.subsurface_to_surface.end()) {
+                state.surface_to_parent_surface.erase(it->second);
+                state.subsurface_to_surface.erase(it);
+            }
+        }
+        if (role_enum == Role::Surface) {
+            state.surface_to_toplevel.erase(role_id);
+            state.surface_to_parent_surface.erase(role_id);
+            state.surface_metadata.erase(role_id);
+            for (auto it = state.subsurface_to_surface.begin(); it != state.subsurface_to_surface.end();) {
+                if (it->second == role_id)
+                    it = state.subsurface_to_surface.erase(it);
+                else
+                    ++it;
+            }
+        }
     }
     return true;
 }
@@ -1133,6 +1180,29 @@ std::vector<WindowInfo> list_windows(const std::shared_ptr<ConnState> &state) {
             return {it->second.committed_frame->width, it->second.committed_frame->height};
         return {0, 0};
     };
+    // Walk subsurface parents until we reach a surface that owns toplevel
+    // metadata. Games routinely put the visible window content in a subsurface
+    // so the rendering surface itself carries no app_id/title.
+    const auto inherited_from = [&state](std::uint32_t sid) -> SurfaceMetadata {
+        for (int depth = 0; depth < 16 && sid; ++depth) {
+            const auto top = state->surface_to_toplevel.find(sid);
+            if (top != state->surface_to_toplevel.end()) {
+                const auto it = state->toplevels.find(top->second);
+                if (it != state->toplevels.end() && (it->second.app_id || it->second.title))
+                    return SurfaceMetadata{it->second.app_id, it->second.title};
+            }
+            // The toplevel may already be gone (popup dismissed, window
+            // recreated) while the surface keeps rendering: fall back to the
+            // last name we saw for it rather than dropping the identity.
+            if (const auto meta = state->surface_metadata.find(sid);
+                meta != state->surface_metadata.end() && (meta->second.app_id || meta->second.title))
+                return meta->second;
+            const auto parent = state->surface_to_parent_surface.find(sid);
+            if (parent == state->surface_to_parent_surface.end()) break;
+            sid = parent->second;
+        }
+        return {};
+    };
     std::unordered_set<std::uint32_t> listed;
     for (const auto &[tid, top] : state->toplevels) {
         (void)tid;
@@ -1140,6 +1210,7 @@ std::vector<WindowInfo> list_windows(const std::shared_ptr<ConnState> &state) {
         info.surface_id = top.surface_id;
         info.app_id = top.app_id;
         info.title = top.title;
+        info.origin = WindowOrigin::Toplevel;
         std::tie(info.width, info.height) = size_of(top.surface_id);
         out.push_back(std::move(info));
         listed.insert(top.surface_id);
@@ -1151,10 +1222,26 @@ std::vector<WindowInfo> list_windows(const std::shared_ptr<ConnState> &state) {
         if (!surf.committed_frame.has_value() && !surf.committed_dmabuf_frame.has_value()) continue;
         WindowInfo info;
         info.surface_id = sid;
+        if (const auto meta = inherited_from(sid); meta.app_id || meta.title) {
+            info.app_id = meta.app_id;
+            info.title = meta.title;
+            info.origin = WindowOrigin::Subsurface;
+        } else {
+            info.origin = WindowOrigin::Bare;
+        }
         std::tie(info.width, info.height) = size_of(sid);
         out.push_back(std::move(info));
     }
     return out;
+}
+
+SessionCounters session_counters(const std::shared_ptr<ConnState> &state) {
+    SessionCounters counters;
+    if (!state) return counters;
+    std::lock_guard lock(state->data_mutex);
+    counters.surfaces = state->surfaces.size();
+    counters.toplevels = state->toplevels.size();
+    return counters;
 }
 
 double input_scale(const std::shared_ptr<ConnState> &state, std::uint32_t surface_id) {

@@ -181,6 +181,7 @@ std::vector<WindowInfo> ControlledApp::windows() const {
             info.width = window.width;
             info.height = window.height;
             info.pid = static_cast<int>(session->owner_pid);
+            info.origin = static_cast<WindowOrigin>(window.origin);
             info.selected = active && active_surface == window.surface_id;
             out.push_back(std::move(info));
         }
@@ -191,8 +192,8 @@ std::vector<SessionInfo> ControlledApp::sessions() const {
     std::vector<SessionInfo> out;
     if (!impl_) return out;
     for (const auto &status : detail::session_status(impl_->child, impl_->match_regex)) {
-        out.push_back(SessionInfo{
-            static_cast<int>(status.owner_pid), status.connected, status.matched, static_cast<int>(status.windows)});
+        out.push_back(SessionInfo{static_cast<int>(status.owner_pid), status.connected, status.matched,
+            static_cast<int>(status.windows), static_cast<int>(status.surfaces), static_cast<int>(status.toplevels)});
     }
     return out;
 }
@@ -209,16 +210,33 @@ result<void> ControlledApp::select_window(int index) {
             // surface in the same session so capture and input agree with the
             // selection marker.
             if (windows[i].width <= 0 || windows[i].height <= 0) {
+                // Prefer content that belongs to this same toplevel (matched by
+                // inherited metadata); fall back to the largest frameful surface
+                // in the session when nothing declares a relation.
+                const std::string want_app_id = windows[i].app_id.value_or("");
+                const std::string want_title = windows[i].title.value_or("");
                 std::int64_t best_area = -1;
+                std::int64_t fallback_area = -1;
                 std::uint32_t best = 0;
+                std::uint32_t fallback = 0;
                 for (const auto &candidate : windows) {
                     const std::int64_t area = static_cast<std::int64_t>(candidate.width) * candidate.height;
-                    if (area > best_area) {
+                    if (area <= 0) continue;
+                    if (area > fallback_area) {
+                        fallback_area = area;
+                        fallback = candidate.surface_id;
+                    }
+                    const bool same = (want_app_id.empty() || candidate.app_id.value_or("") == want_app_id)
+                                   && (want_title.empty() || candidate.title.value_or("") == want_title);
+                    if (same && area > best_area) {
                         best_area = area;
                         best = candidate.surface_id;
                     }
                 }
-                if (best) surface = best;
+                if (best)
+                    surface = best;
+                else if (fallback)
+                    surface = fallback;
             }
             impl_->session = session;
             {

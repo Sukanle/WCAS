@@ -28,6 +28,8 @@ struct SessionStatus {
     bool connected = false;
     bool matched = false;
     std::size_t windows = 0;
+    std::size_t surfaces = 0;
+    std::size_t toplevels = 0;
 };
 std::vector<SessionStatus> session_status(pid_t root, const std::string &match_regex);
 

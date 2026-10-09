@@ -52,6 +52,16 @@ struct WCAS_API CursorPosition {
     double x = 0.0;
     double y = 0.0;
 };
+/// How a window was discovered. A rendering surface often is not the toplevel
+/// itself (games put window content in a subsurface), so this distinguishes a
+/// real toplevel from content that merely inherited its metadata.
+enum class WCAS_API WindowOrigin : uint8_t {
+    Toplevel = 0,
+    /// Content surface whose app_id/title were inherited from an ancestor toplevel.
+    Subsurface,
+    /// Renders frames but has neither a toplevel nor a known parent.
+    Bare,
+};
 /// A window managed by wcas: the main app window or a later-started child
 /// window (overlay, dialog) that opened its own Wayland connection.
 struct WCAS_API WindowInfo {
@@ -61,6 +71,7 @@ struct WCAS_API WindowInfo {
     int height = 0;
     int pid = 0;
     bool selected = false;
+    WindowOrigin origin = WindowOrigin::Bare;
 };
 /// Diagnostic view of every proxy session seen for this launch, including
 /// disconnected or unmatched ones (useful when a window seems to disappear).
@@ -69,6 +80,11 @@ struct WCAS_API SessionInfo {
     bool connected = false;
     bool matched = false;
     int windows = 0;
+    /// Total wl_surface / xdg_toplevel objects tracked for this session. A
+    /// session with surfaces>0 but windows==0 exists but has not rendered yet;
+    /// surfaces==0 means no window was ever created on this connection.
+    int surfaces = 0;
+    int toplevels = 0;
 };
 class WCAS_API LaunchConfig {
 public:

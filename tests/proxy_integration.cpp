@@ -316,6 +316,110 @@ int main() {
     assert(state->pointer_sx.load() == 300u * 256u);
     assert(state->pointer_sy.load() == 400u * 256u);
 
+    // ---- toplevel metadata lifetime and subsurface inheritance ----
+    // A rendering surface is often not the toplevel: games put the visible
+    // content in a wl_subsurface. Such a surface must inherit the toplevel's
+    // app_id/title so callers can still identify the window, and destroying the
+    // toplevel must not leave its metadata (a 0x0 ghost) behind.
+    bind_global(app_pair[1], compositor_pair[1], 40, "wl_subcompositor", 5, 51);
+    bind_global(app_pair[1], compositor_pair[1], 41, "xdg_wm_base", 5, 52);
+
+    auto get_xdg_surface = message(52, 2);   // xdg_wm_base.get_xdg_surface = "no"
+    put(get_xdg_surface, 62);
+    put(get_xdg_surface, 60);
+    finish(get_xdg_surface);
+    send_message(app_pair[1], get_xdg_surface);
+    (void)receive(compositor_pair[1]);
+
+    auto get_toplevel = message(62, 1);   // xdg_surface.get_toplevel = "n"
+    put(get_toplevel, 63);
+    finish(get_toplevel);
+    send_message(app_pair[1], get_toplevel);
+    (void)receive(compositor_pair[1]);
+
+    auto set_title = message(63, 2);   // xdg_toplevel.set_title = "s"
+    string_arg(set_title, "UIPlatform");
+    finish(set_title);
+    send_message(app_pair[1], set_title);
+    (void)receive(compositor_pair[1]);
+
+    auto set_app_id = message(63, 3);   // xdg_toplevel.set_app_id = "s"
+    string_arg(set_app_id, "platformprocess.exe");
+    finish(set_app_id);
+    send_message(app_pair[1], set_app_id);
+    (void)receive(compositor_pair[1]);
+
+    // Only the subsurface renders; the toplevel surface stays 0x0, which is
+    // exactly the shape that made `list` show metadata-less content.
+    auto get_subsurface = message(51, 1);   // wl_subcompositor.get_subsurface = "noo"
+    put(get_subsurface, 64);
+    put(get_subsurface, 61);
+    put(get_subsurface, 60);
+    finish(get_subsurface);
+    send_message(app_pair[1], get_subsurface);
+    (void)receive(compositor_pair[1]);
+
+    {
+        std::lock_guard lock(state->data_mutex);
+        auto &surf = state->surfaces[61];
+        surf.committed_frame = skl::wcas::proxy::RetainedShm{};
+        surf.committed_frame->width = 800;
+        surf.committed_frame->height = 600;
+    }
+
+    {
+        bool saw_toplevel = false;
+        bool saw_inherited = false;
+        for (const auto &window : skl::wcas::proxy::list_windows(state)) {
+            if (window.surface_id == 60) {
+                assert(window.origin == skl::wcas::proxy::WindowOrigin::Toplevel);
+                assert(window.app_id && *window.app_id == "platformprocess.exe");
+                saw_toplevel = true;
+            }
+            if (window.surface_id == 61) {
+                // Metadata must come from the parent chain, not be empty.
+                assert(window.origin == skl::wcas::proxy::WindowOrigin::Subsurface);
+                assert(window.app_id && *window.app_id == "platformprocess.exe");
+                assert(window.title && *window.title == "UIPlatform");
+                assert(window.width == 800 && window.height == 600);
+                saw_inherited = true;
+            }
+        }
+        assert(saw_toplevel && saw_inherited);
+    }
+
+    // Destroying the toplevel must drop its metadata, otherwise `list` keeps
+    // reporting a window that no longer exists.
+    auto destroy_toplevel = message(63, 0);
+    finish(destroy_toplevel);
+    send_message(app_pair[1], destroy_toplevel);
+    (void)receive(compositor_pair[1]);
+    {
+        std::lock_guard lock(state->data_mutex);
+        assert(state->toplevels.find(63) == state->toplevels.end());
+        assert(state->surface_to_toplevel.find(60) == state->surface_to_toplevel.end());
+    }
+    // The toplevel object is gone, but the surface still renders and keeps its
+    // last known name, so it stays selectable by app_id/title.
+    for (const auto &window : skl::wcas::proxy::list_windows(state)) {
+        if (window.surface_id == 61) {
+            assert(window.origin == skl::wcas::proxy::WindowOrigin::Subsurface);
+            assert(window.app_id && *window.app_id == "platformprocess.exe");
+            assert(window.title && *window.title == "UIPlatform");
+        }
+    }
+
+    // Destroying the subsurface drops the parent relation too.
+    auto destroy_subsurface = message(64, 0);
+    finish(destroy_subsurface);
+    send_message(app_pair[1], destroy_subsurface);
+    (void)receive(compositor_pair[1]);
+    {
+        std::lock_guard lock(state->data_mutex);
+        assert(state->subsurface_to_surface.find(64) == state->subsurface_to_surface.end());
+        assert(state->surface_to_parent_surface.find(61) == state->surface_to_parent_surface.end());
+    }
+
     ::shutdown(app_pair[1], SHUT_RDWR);
     ::close(app_pair[1]);
     ::close(compositor_pair[1]);
