@@ -14,6 +14,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -42,11 +44,12 @@ double to_logical(const std::shared_ptr<proxy::ConnState> &session, std::uint32_
 }
 
 }   // namespace
-
 bool ControlledApp::ensure_active_session() const {
     if (!impl_) return false;
-    // Keep the selected session while it is live and actually renders.
-    if (impl_->session && impl_->session->connected.load() && impl_->session->capturable_surface.load()) return true;
+    // An explicitly selected session wins as long as it is still connected:
+    // switching to another session of the same launch tree would silently send
+    // input/capture to a different window than the caller chose.
+    if (impl_->session && impl_->session->connected.load()) return true;
     if (impl_->child > 0) {
         // Prefer another live session that has a rendered frame (e.g. the main
         // window after a dismissed overlay). Persist it so status/list agree.
@@ -196,6 +199,28 @@ std::vector<SessionInfo> ControlledApp::sessions() const {
         out.push_back(SessionInfo{static_cast<int>(status.owner_pid), status.connected, status.matched,
             static_cast<int>(status.windows), static_cast<int>(status.surfaces), static_cast<int>(status.toplevels),
             status.command});
+    }
+    return out;
+}
+std::vector<SurfaceInfo> ControlledApp::surfaces() const {
+    std::vector<SurfaceInfo> out;
+    if (!impl_ || impl_->child <= 0) return out;
+    for (const auto &session : detail::sessions_for(impl_->child, impl_->match_regex)) {
+        for (const auto &surface : proxy::dump_surfaces(session)) {
+            SurfaceInfo info;
+            info.pid = static_cast<int>(session->owner_pid);
+            info.surface_id = surface.surface_id;
+            info.parent_surface_id = surface.parent_surface_id;
+            info.toplevel_id = surface.toplevel_id;
+            info.role = surface.role;
+            info.app_id = surface.app_id.value_or("");
+            info.title = surface.title.value_or("");
+            info.width = surface.width;
+            info.height = surface.height;
+            info.has_frame = surface.has_frame;
+            info.last_commit_seq = surface.last_commit_seq;
+            out.push_back(std::move(info));
+        }
     }
     return out;
 }
@@ -378,6 +403,10 @@ result<void> ControlledApp::press_key(std::string combination) const {
     if (!s->keyboard_obj) return code(errc::input_injection_failed);
     const auto surface = input_target(s);
     if (!surface) return code(errc::input_injection_failed);
+    if (std::getenv("WCAS_DEBUG")) {
+        std::fprintf(stderr, "DEBUG input: press_key '%s' session_pid=%ld keyboard_obj=%u target_surface=%u\n",
+            combination.c_str(), static_cast<long>(s->owner_pid), s->keyboard_obj, surface);
+    }
 
     const auto parsed = proxy::parse_key_combination(combination);
     if (parsed.key.empty()) return code(errc::input_injection_failed);
@@ -465,7 +494,7 @@ void ControlledApp::stop() noexcept {
     if (!impl_ || impl_->child <= 0) return;
     const auto child = impl_->child;
     detail::terminate_group(impl_->process_group > 0 ? impl_->process_group : child);
-    detail::erase_session(child);
+    detail::erase_sessions_for(child);
     if (impl_->session) impl_->session->client_fd = -1;
     impl_->child = -1;
 }

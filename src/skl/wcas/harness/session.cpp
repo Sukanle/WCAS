@@ -66,9 +66,40 @@ std::string process_text(pid_t pid) {
 }
 
 std::mutex sessions_mutex;
-std::unordered_map<pid_t, std::weak_ptr<proxy::ConnState>> sessions;
+/// Keyed by a unique connection id (never by pid: one process may open several
+/// Wayland connections).
+std::unordered_map<std::uint64_t, std::weak_ptr<proxy::ConnState>> sessions;
+std::uint64_t next_session_id = 1;
 
 }   // namespace
+
+void register_session(pid_t pid, const std::shared_ptr<proxy::ConnState> &state) {
+    (void)pid;   // owner_pid already lives on the state
+    std::lock_guard lock(sessions_mutex);
+    sessions[next_session_id++] = state;
+}
+
+void erase_session(const std::shared_ptr<proxy::ConnState> &state) {
+    std::lock_guard lock(sessions_mutex);
+    for (auto it = sessions.begin(); it != sessions.end();) {
+        auto locked = it->second.lock();
+        if (!locked || locked == state)
+            it = sessions.erase(it);
+        else
+            ++it;
+    }
+}
+
+void erase_sessions_for(pid_t pid) {
+    std::lock_guard lock(sessions_mutex);
+    for (auto it = sessions.begin(); it != sessions.end();) {
+        auto locked = it->second.lock();
+        if (!locked || (locked->owner_pid > 0 && static_cast<pid_t>(locked->owner_pid) == pid))
+            it = sessions.erase(it);
+        else
+            ++it;
+    }
+}
 
 std::shared_ptr<proxy::ConnState> session_for(pid_t pid) {
     std::lock_guard lock(sessions_mutex);
@@ -86,15 +117,14 @@ std::shared_ptr<proxy::ConnState> session_for(pid_t pid) {
         return state->owner_pid > 0
             && (state->owner_pid == pid || descendant(static_cast<pid_t>(state->owner_pid), pid));
     };
-    if (auto exact = sessions.find(pid); exact != sessions.end()) {
-        if (auto state = exact->second.lock(); state && consider(state)) return state;
-    }
     for (auto it = sessions.begin(); it != sessions.end();) {
         auto state = it->second.lock();
         if (!state) {
             it = sessions.erase(it);
             continue;
         }
+        // Prefer an exact pid match over a mere descendant.
+        if (state->owner_pid == pid && state->connected.load() && consider(state)) return state;
         if (belongs(state) && consider(state)) return state;
         ++it;
     }
@@ -174,16 +204,6 @@ std::vector<SessionStatus> session_status(pid_t root, const std::string &match_r
     std::sort(out.begin(), out.end(),
         [](const SessionStatus &a, const SessionStatus &b) { return a.owner_pid < b.owner_pid; });
     return out;
-}
-
-void register_session(pid_t pid, const std::shared_ptr<proxy::ConnState> &state) {
-    std::lock_guard lock(sessions_mutex);
-    sessions[pid] = state;
-}
-
-void erase_session(pid_t pid) {
-    std::lock_guard lock(sessions_mutex);
-    sessions.erase(pid);
 }
 
 void terminate_group(pid_t pid) noexcept {

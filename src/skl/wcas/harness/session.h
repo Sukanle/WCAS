@@ -36,9 +36,14 @@ struct SessionStatus {
 };
 std::vector<SessionStatus> session_status(pid_t root, const std::string &match_regex);
 
-/// Register / remove a proxy session keyed by the connecting process id.
+/// Register / remove a proxy session. Sessions are keyed per *connection*, not
+/// per process: one process (Wine/winewayland) can open several Wayland
+/// connections, each carrying its own windows, and keying by pid would drop all
+/// but the last.
 void register_session(pid_t pid, const std::shared_ptr<proxy::ConnState> &state);
-void erase_session(pid_t pid);
+void erase_session(const std::shared_ptr<proxy::ConnState> &state);
+/// Remove every session owned by `pid` (used on shutdown).
+void erase_sessions_for(pid_t pid);
 
 /// SIGINT -> bounded wait -> SIGTERM -> SIGKILL a process group and reap the
 /// leader process.
