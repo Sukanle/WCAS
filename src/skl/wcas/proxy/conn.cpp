@@ -319,6 +319,7 @@ bool transform_arguments(std::vector<char> &msg, bool app_to_upstream, const std
                         // interface recorded for the sent upstream id (for example
                         // wl_seat.get_pointer -> wl_pointer).
                         if (!role_name.empty()) {
+                            std::lock_guard lock(state.data_mutex);
                             state.object_roles[app_id] = role_name;
                             state.object_role_enum[app_id] = role_from_interface(role_name);
                         }
@@ -336,6 +337,7 @@ bool transform_arguments(std::vector<char> &msg, bool app_to_upstream, const std
                                 else
                                     map.link(app_id, app_id);
                                 if (!iface.empty()) {
+                                    std::lock_guard lock(state.data_mutex);
                                     state.object_roles[app_id] = iface;
                                     state.object_role_enum[app_id] = role_from_interface(iface);
                                 }
@@ -374,6 +376,11 @@ bool transform_arguments(std::vector<char> &msg, bool app_to_upstream, const std
 bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnState &state,
     const std::vector<int> &fds, std::size_t *fd_index, bool *drop) {
     *drop = false;
+    // Serialize the whole translation against external readers. The proxy is a
+    // single writer; readers (`list_windows`, `dump_surfaces`, capture, ...)
+    // take the same recursive mutex, so none of them can observe a map
+    // mid-mutation.
+    std::lock_guard lock(state.data_mutex);
     if (msg.size() < 8 || (msg.size() & 3U)) return false;
     const auto sender = word(msg.data());
     const auto opcode = static_cast<std::uint16_t>(word(msg.data() + 4) & 0XFFFFU);
@@ -445,6 +452,7 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
         if (next + 4 <= msg.size()) {
             const auto app_id = word(msg.data() + next + 4);
             if (app_id && !iface.empty()) {
+                std::lock_guard lock(state.data_mutex);
                 state.object_roles[app_id] = iface;
                 state.object_role_enum[app_id] = role_from_interface(iface);
             }
@@ -481,6 +489,7 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
         const auto surface = word(msg.data() + 12);
         const auto parent = word(msg.data() + 16);
         if (subsurface && surface && parent) {
+            std::lock_guard lock(state.data_mutex);
             state.subsurface_to_surface[subsurface] = surface;
             state.surface_to_parent_surface[surface] = parent;
         }
@@ -488,10 +497,14 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
     if (app_to_upstream && role == "xdg_wm_base" && opcode == 2) {
         const auto xdg_surface = word(msg.data() + 8);
         const auto surface = word(msg.data() + 12);
-        if (xdg_surface && surface) state.xdg_surface_to_surface[xdg_surface] = surface;
+        if (xdg_surface && surface) {
+            std::lock_guard lock(state.data_mutex);
+            state.xdg_surface_to_surface[xdg_surface] = surface;
+        }
     }
     if (app_to_upstream && role == "xdg_surface" && opcode == 1) {
         const auto toplevel = word(msg.data() + 8);
+        std::lock_guard lock(state.data_mutex);
         const auto surface_it = state.xdg_surface_to_surface.find(role_id);
         if (toplevel && surface_it != state.xdg_surface_to_surface.end()) {
             state.surface_to_toplevel[surface_it->second] = toplevel;
@@ -499,6 +512,7 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
         }
     }
     if (app_to_upstream && role == "xdg_toplevel" && (opcode == 2 || opcode == 3)) {
+        std::lock_guard lock(state.data_mutex);
         const auto toplevel_it = state.toplevels.find(role_id);
         if (toplevel_it != state.toplevels.end()) {
             std::size_t str_next = 0;
@@ -832,6 +846,21 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
         }
     }
 
+    // Track wl_keyboard focus changes from the compositor. Without this our
+    // own `keyboard_focus` bookkeeping goes stale: the compositor sends a real
+    // `leave` when another window takes focus, and `ensure_keyboard_focus`
+    // would then believe the surface is still focused and skip re-sending
+    // `enter`, so injected keys are dropped by the app.
+    if (!app_to_upstream && role == "wl_keyboard" && opcode == 1 && words >= 2) {
+        std::lock_guard lock(state.data_mutex);
+        state.keyboard_focus = word(msg.data() + 12);
+    }
+    if (!app_to_upstream && role == "wl_keyboard" && opcode == 2 && words >= 2) {
+        std::lock_guard lock(state.data_mutex);
+        const auto surface = word(msg.data() + 12);
+        if (state.keyboard_focus == surface) state.keyboard_focus = 0;
+    }
+
     // Track focused surface and position from pointer.enter event (upstream→app)
     if (!app_to_upstream && role == "wl_pointer" && opcode == 0 && words >= 3) {
         // wl_pointer.enter: serial(4), surface(4), sx(4), sy(4)
@@ -921,9 +950,13 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
             // hand it the last known name before dropping it; otherwise the
             // still-visible window loses its identity.
             if (const auto meta = state.surface_metadata.find(role_id); meta != state.surface_metadata.end()) {
+                // Copy first: inserting into the map below may rehash and
+                // invalidate `meta`, and reading through the stale iterator
+                // corrupted the heap.
+                const SurfaceMetadata saved = meta->second;
                 for (const auto &[child, parent] : state.surface_to_parent_surface) {
                     if (parent == role_id && state.surface_metadata.find(child) == state.surface_metadata.end())
-                        state.surface_metadata[child] = meta->second;
+                        state.surface_metadata[child] = saved;
                 }
             }
             state.surface_to_toplevel.erase(role_id);
@@ -1309,6 +1342,45 @@ SessionCounters session_counters(const std::shared_ptr<ConnState> &state) {
     counters.surfaces = state->surfaces.size();
     counters.toplevels = state->toplevels.size();
     return counters;
+}
+
+std::vector<SurfaceDebug> dump_surfaces(const std::shared_ptr<ConnState> &state) {
+    std::vector<SurfaceDebug> out;
+    if (!state) return out;
+    std::lock_guard lock(state->data_mutex);
+    for (const auto &[sid, surf] : state->surfaces) {
+        SurfaceDebug info;
+        info.surface_id = sid;
+        if (const auto role = state->object_roles.find(sid); role != state->object_roles.end())
+            info.role = role->second;
+        if (const auto parent = state->surface_to_parent_surface.find(sid);
+            parent != state->surface_to_parent_surface.end())
+            info.parent_surface_id = parent->second;
+        if (const auto top = state->surface_to_toplevel.find(sid); top != state->surface_to_toplevel.end()) {
+            info.toplevel_id = top->second;
+            if (const auto entry = state->toplevels.find(top->second); entry != state->toplevels.end()) {
+                info.app_id = entry->second.app_id;
+                info.title = entry->second.title;
+            }
+        }
+        if (const auto meta = state->surface_metadata.find(sid); meta != state->surface_metadata.end()) {
+            if (!info.app_id) info.app_id = meta->second.app_id;
+            if (!info.title) info.title = meta->second.title;
+        }
+        if (surf.committed_dmabuf_frame.has_value()) {
+            info.width = surf.committed_dmabuf_frame->width;
+            info.height = surf.committed_dmabuf_frame->height;
+        } else if (surf.committed_frame.has_value()) {
+            info.width = surf.committed_frame->width;
+            info.height = surf.committed_frame->height;
+        }
+        info.has_frame = surf.committed_frame.has_value() || surf.committed_dmabuf_frame.has_value();
+        info.last_commit_seq = surf.last_commit_seq;
+        out.push_back(std::move(info));
+    }
+    std::sort(out.begin(), out.end(),
+        [](const SurfaceDebug &a, const SurfaceDebug &b) { return a.surface_id < b.surface_id; });
+    return out;
 }
 
 double input_scale(const std::shared_ptr<ConnState> &state, std::uint32_t surface_id) {

@@ -277,7 +277,10 @@ struct ConnState {
     int keymap_fd = -1;
     std::uint32_t keymap_size = 0;
 
-    mutable std::mutex data_mutex;
+    /// Guards every mutable map below. Recursive so `rewrite` can hold it for a
+    /// whole message while its sub-blocks take it again; a single writer thread
+    /// (the proxy loop) then cannot race external readers (`list`/`surfaces`).
+    mutable std::recursive_mutex data_mutex;
 
     ~ConnState();
 };
@@ -307,6 +310,22 @@ void set_capture_target(
 /// Enumerate the session's capturable windows (toplevels plus bare committed
 /// surfaces), newest metadata included. Used by `list` / window selection.
 std::vector<WindowInfo> list_windows(const std::shared_ptr<ConnState> &state);
+
+/// One tracked surface, for diagnostics. Includes surfaces that never became
+/// toplevels and never rendered, which `list_windows` deliberately omits.
+struct SurfaceDebug {
+    std::uint32_t surface_id = 0;
+    std::string role;
+    std::uint32_t parent_surface_id = 0;
+    std::uint32_t toplevel_id = 0;
+    std::optional<std::string> app_id;
+    std::optional<std::string> title;
+    std::int32_t width = 0;
+    std::int32_t height = 0;
+    bool has_frame = false;
+    std::uint64_t last_commit_seq = 0;
+};
+std::vector<SurfaceDebug> dump_surfaces(const std::shared_ptr<ConnState> &state);
 
 /// Cheap diagnostic counters for one session: how many wl_surface and
 /// xdg_toplevel objects are tracked at all, regardless of whether they have a
