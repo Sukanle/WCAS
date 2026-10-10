@@ -507,15 +507,6 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
                 toplevel_it->second.title = value;
             else
                 toplevel_it->second.app_id = value;
-            // Remember it against the surface too, so the name survives if the
-            // toplevel object is destroyed while the surface keeps rendering.
-            if (toplevel_it->second.surface_id) {
-                auto &meta = state.surface_metadata[toplevel_it->second.surface_id];
-                if (opcode == 2)
-                    meta.title = value;
-                else
-                    meta.app_id = value;
-            }
         }
     }
 
@@ -721,6 +712,7 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
         std::lock_guard lock(state.data_mutex);
         auto &surf = state.surfaces[role_id];
         surf.commit_count++;
+        surf.last_commit_seq = state.commit_count.load();
 
         if (surf.pending_dmabuf.has_value()) {
             // A DMA-BUF frame is snapshotted with duplicated plane FDs so it
@@ -918,7 +910,6 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
         if (role_enum == Role::Surface) {
             state.surface_to_toplevel.erase(role_id);
             state.surface_to_parent_surface.erase(role_id);
-            state.surface_metadata.erase(role_id);
             for (auto it = state.subsurface_to_surface.begin(); it != state.subsurface_to_surface.end();) {
                 if (it->second == role_id)
                     it = state.subsurface_to_surface.erase(it);
@@ -1191,12 +1182,6 @@ std::vector<WindowInfo> list_windows(const std::shared_ptr<ConnState> &state) {
                 if (it != state->toplevels.end() && (it->second.app_id || it->second.title))
                     return SurfaceMetadata{it->second.app_id, it->second.title};
             }
-            // The toplevel may already be gone (popup dismissed, window
-            // recreated) while the surface keeps rendering: fall back to the
-            // last name we saw for it rather than dropping the identity.
-            if (const auto meta = state->surface_metadata.find(sid);
-                meta != state->surface_metadata.end() && (meta->second.app_id || meta->second.title))
-                return meta->second;
             const auto parent = state->surface_to_parent_surface.find(sid);
             if (parent == state->surface_to_parent_surface.end()) break;
             sid = parent->second;
@@ -1215,14 +1200,52 @@ std::vector<WindowInfo> list_windows(const std::shared_ptr<ConnState> &state) {
         out.push_back(std::move(info));
         listed.insert(top.surface_id);
     }
-    // Surfaces that render but never became a toplevel (subsurfaces, overlays
-    // created without xdg_toplevel) are still capturable/controllable.
+    // A session often has exactly one named toplevel whose own surface never
+    // renders (a 0x0 shell), while the app draws into a separate (or freshly
+    // recreated) surface with no explicit parent link. Only in that shape do we
+    // attribute the most recently committed nameless surface to the toplevel;
+    // if the toplevel renders itself we leave other surfaces alone, and stale
+    // leftovers stay "bare".
+    std::optional<SurfaceMetadata> sole_toplevel;
+    std::size_t shell_toplevels = 0;
+    for (const auto &[tid, top] : state->toplevels) {
+        (void)tid;
+        if (!top.app_id && !top.title) continue;
+        const auto [width, height] = size_of(top.surface_id);
+        if (width != 0 || height != 0) continue;   // renders itself: not a shell
+        ++shell_toplevels;
+        sole_toplevel = SurfaceMetadata{top.app_id, top.title};
+    }
+    if (shell_toplevels != 1) sole_toplevel.reset();
+
+    std::uint32_t most_recent = 0;
+    std::uint64_t most_recent_seq = 0;
     for (const auto &[sid, surf] : state->surfaces) {
         if (listed.count(sid)) continue;
         if (!surf.committed_frame.has_value() && !surf.committed_dmabuf_frame.has_value()) continue;
+        if (most_recent == 0 || surf.last_commit_seq >= most_recent_seq) {
+            most_recent_seq = surf.last_commit_seq;
+            most_recent = sid;
+        }
+    }
+
+    // Surfaces that render but never became a toplevel (subsurfaces, overlays
+    // created without xdg_toplevel) are still capturable/controllable. Sort
+    // them by recency so the actively drawn surface comes first.
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> rendered;
+    for (const auto &[sid, surf] : state->surfaces) {
+        if (listed.count(sid)) continue;
+        if (!surf.committed_frame.has_value() && !surf.committed_dmabuf_frame.has_value()) continue;
+        rendered.emplace_back(surf.last_commit_seq, sid);
+    }
+    std::sort(rendered.begin(), rendered.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+    for (const auto &[seq, sid] : rendered) {
+        (void)seq;
         WindowInfo info;
         info.surface_id = sid;
-        if (const auto meta = inherited_from(sid); meta.app_id || meta.title) {
+        auto meta = inherited_from(sid);
+        if (!meta.app_id && !meta.title && sid == most_recent && sole_toplevel.has_value()) meta = *sole_toplevel;
+        if (meta.app_id || meta.title) {
             info.app_id = meta.app_id;
             info.title = meta.title;
             info.origin = WindowOrigin::Subsurface;

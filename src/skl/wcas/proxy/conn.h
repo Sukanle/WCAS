@@ -146,12 +146,8 @@ struct ToplevelState {
     std::optional<std::string> title;
 };
 
-/// Last metadata observed for a wl_surface, kept after its xdg_toplevel is
-/// destroyed. When an app closes a window but keeps rendering its surface (a
-/// popup dismissed with Escape, a toplevel recreated for the same surface), the
-/// name would otherwise vanish and the window could no longer be selected by
-/// app_id/title. This is not a ghost toplevel: it never creates a `list` entry
-/// of its own, it only lets a live rendering surface inherit a stable name.
+/// A surface's app_id/title, either from a live toplevel or inherited from an
+/// ancestor. Empty optionals mean "no name known".
 struct SurfaceMetadata {
     std::optional<std::string> app_id;
     std::optional<std::string> title;
@@ -186,6 +182,10 @@ struct SurfaceState {
     std::optional<RetainedShm> committed_frame;
     std::optional<RetainedDmaBuf> committed_dmabuf_frame;
     std::uint64_t commit_count = 0;
+    /// Global commit counter value of this surface's most recent commit. Used
+    /// to tell which of several rendering surfaces is the one the app is
+    /// actively drawing to (the others may be stale leftovers).
+    std::uint64_t last_commit_seq = 0;
 };
 
 struct ConnState {
@@ -225,9 +225,6 @@ struct ConnState {
     std::unordered_map<std::uint32_t, std::uint32_t> xdg_surface_to_surface;
     std::unordered_map<std::uint32_t, std::uint32_t> surface_to_toplevel;
     std::unordered_map<std::uint32_t, ToplevelState> toplevels;
-    /// Last known app_id/title per surface, surviving toplevel destruction (see
-    /// SurfaceMetadata). Keyed by the surface that carried the toplevel.
-    std::unordered_map<std::uint32_t, SurfaceMetadata> surface_metadata;
     /// `wl_subsurface` object -> the wl_surface it decorates, and the wl_surface
     /// of the `wl_subcompositor.get_subsurface` call. A rendering surface often
     /// never becomes a toplevel itself (games put their window content in a

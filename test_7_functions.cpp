@@ -388,8 +388,8 @@ int main(int argc, char **argv) {
                     const char *origin = w.origin == WindowOrigin::Toplevel   ? "toplevel"
                                        : w.origin == WindowOrigin::Subsurface ? "subsurface"
                                                                               : "bare";
-                    fmt::println("[{}]{} pid={} {}x{} [{}] app_id='{}' title='{}'", i, w.selected ? "*" : " ", w.pid,
-                        w.width, w.height, origin, w.app_id, w.title);
+                    fmt::println("[{}]{} pid={} sid={} {}x{} [{}] app_id='{}' title='{}'", i, w.selected ? "*" : " ",
+                        w.pid, w.surface_id, w.width, w.height, origin, w.app_id, w.title);
                 }
             }
             continue;

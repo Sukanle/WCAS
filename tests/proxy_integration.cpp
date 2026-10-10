@@ -399,14 +399,60 @@ int main() {
         assert(state->toplevels.find(63) == state->toplevels.end());
         assert(state->surface_to_toplevel.find(60) == state->surface_to_toplevel.end());
     }
-    // The toplevel object is gone, but the surface still renders and keeps its
-    // last known name, so it stays selectable by app_id/title.
+    // The toplevel object is gone and there is no other named toplevel to
+    // attribute it to, so the surface is reported as an unnamed "bare"
+    // rendering surface rather than keeping a stale name.
     for (const auto &window : skl::wcas::proxy::list_windows(state)) {
         if (window.surface_id == 61) {
-            assert(window.origin == skl::wcas::proxy::WindowOrigin::Subsurface);
-            assert(window.app_id && *window.app_id == "platformprocess.exe");
-            assert(window.title && *window.title == "UIPlatform");
+            assert(window.origin == skl::wcas::proxy::WindowOrigin::Bare);
+            assert(!window.app_id && !window.title);
         }
+    }
+
+    // ---- shell toplevel attribution ----
+    // A window whose xdg_toplevel surface never renders (0x0) but whose content
+    // is drawn into a separate surface: the most recently committed nameless
+    // surface should inherit the toplevel's name, while an older stale surface
+    // stays bare so it cannot masquerade as the live window.
+    {
+        std::lock_guard lock(state->data_mutex);
+        state->surface_to_toplevel[70] = 80;
+        state->toplevels[80] = {70, std::string("shell.app"), std::string("Shell window")};
+        auto &recent = state->surfaces[71];
+        recent.committed_frame = skl::wcas::proxy::RetainedShm{};
+        recent.committed_frame->width = 1'280;
+        recent.committed_frame->height = 720;
+        recent.last_commit_seq = 1'000;
+        auto &stale = state->surfaces[72];
+        stale.committed_frame = skl::wcas::proxy::RetainedShm{};
+        stale.committed_frame->width = 640;
+        stale.committed_frame->height = 480;
+        stale.last_commit_seq = 10;
+    }
+    {
+        bool recent_named = false;
+        bool stale_bare = false;
+        for (const auto &window : skl::wcas::proxy::list_windows(state)) {
+            if (window.surface_id == 71) {
+                assert(window.origin == skl::wcas::proxy::WindowOrigin::Subsurface);
+                assert(window.app_id && *window.app_id == "shell.app");
+                assert(window.title && *window.title == "Shell window");
+                recent_named = true;
+            }
+            if (window.surface_id == 72) {
+                assert(window.origin == skl::wcas::proxy::WindowOrigin::Bare);
+                assert(!window.app_id && !window.title);
+                stale_bare = true;
+            }
+        }
+        assert(recent_named && stale_bare);
+    }
+    {
+        std::lock_guard lock(state->data_mutex);
+        state->toplevels.erase(80);
+        state->surface_to_toplevel.erase(70);
+        state->surfaces.erase(71);
+        state->surfaces.erase(72);
     }
 
     // Destroying the subsurface drops the parent relation too.
