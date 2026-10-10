@@ -316,6 +316,40 @@ int main() {
     assert(state->pointer_sx.load() == 300u * 256u);
     assert(state->pointer_sy.load() == 400u * 256u);
 
+    // ---- keyboard focus bookkeeping ----
+    // The proxy must mirror the compositor's real enter/leave. Otherwise, after
+    // another window takes focus, `ensure_keyboard_focus` believes the old
+    // surface is still focused and skips re-sending `enter`, so injected keys
+    // are dropped.
+    auto get_keyboard = message(30, 1);   // wl_seat.get_keyboard = "n"
+    put(get_keyboard, 32);
+    finish(get_keyboard);
+    send_message(app_pair[1], get_keyboard);
+    (void)receive(compositor_pair[1]);
+
+    auto kb_enter = message(32, 1);   // wl_keyboard.enter = "uoa"
+    put(kb_enter, 1);                 // serial
+    put(kb_enter, 7);                 // surface
+    put(kb_enter, 0);                 // keys array length 0
+    finish(kb_enter);
+    send_message(compositor_pair[1], kb_enter);
+    (void)receive(app_pair[1]);
+    {
+        std::lock_guard lock(state->data_mutex);
+        assert(state->keyboard_focus == 7);
+    }
+
+    auto kb_leave = message(32, 2);   // wl_keyboard.leave = "uo"
+    put(kb_leave, 2);                 // serial
+    put(kb_leave, 7);                 // surface
+    finish(kb_leave);
+    send_message(compositor_pair[1], kb_leave);
+    (void)receive(app_pair[1]);
+    {
+        std::lock_guard lock(state->data_mutex);
+        assert(state->keyboard_focus == 0);
+    }
+
     // ---- toplevel metadata lifetime and subsurface inheritance ----
     // A rendering surface is often not the toplevel: games put the visible
     // content in a wl_subsurface. Such a surface must inherit the toplevel's
@@ -368,6 +402,25 @@ int main() {
     finish(get_subsurface);
     send_message(app_pair[1], get_subsurface);
     (void)receive(compositor_pair[1]);
+
+    // Several more children of the same shell surface: destroying the shell
+    // must hand the name to every one of them (this also exercises rehashing
+    // the metadata map while iterating the parent links).
+    for (std::uint32_t pair = 0; pair < 20; ++pair) {
+        const std::uint32_t sid = 100 + pair;
+        auto create_surface = message(6, 0);
+        put(create_surface, sid);
+        finish(create_surface);
+        send_message(app_pair[1], create_surface);
+        (void)receive(compositor_pair[1]);
+        auto child = message(51, 1);
+        put(child, 200 + pair);
+        put(child, sid);
+        put(child, 60);
+        finish(child);
+        send_message(app_pair[1], child);
+        (void)receive(compositor_pair[1]);
+    }
 
     {
         std::lock_guard lock(state->data_mutex);
@@ -430,6 +483,13 @@ int main() {
         std::lock_guard lock(state->data_mutex);
         assert(state->surface_metadata.find(60) == state->surface_metadata.end());
         assert(state->surface_to_parent_surface.find(61) == state->surface_to_parent_surface.end());
+        // Every child inherited the shell surface's name before it was dropped.
+        for (std::uint32_t pair = 0; pair < 20; ++pair) {
+            const auto it = state->surface_metadata.find(100 + pair);
+            assert(it != state->surface_metadata.end());
+            assert(it->second.app_id && *it->second.app_id == "platformprocess.exe");
+            assert(it->second.title && *it->second.title == "UIPlatform");
+        }
     }
     for (const auto &window : skl::wcas::proxy::list_windows(state)) {
         if (window.surface_id == 61) {

@@ -1,10 +1,13 @@
 #include "skl/wcas/wcas.h"
 #include "proxy/conn.h"
+#include "harness/session.h"
+
 #include "skl/wcas/error.h"
 
 #include "proxy/wire_meta.h"
 #include "proxy/interfaces.h"
 #include <cassert>
+#include <memory>
 
 int main() {
     const auto *shm = skl::wcas::proxy::wire::find("wl_shm");
@@ -60,5 +63,26 @@ int main() {
 
     assert(skl::make_error_code(skl::wcas::errc::feature_not_implemented).message().find("not implemented")
            != std::string::npos);
+
+    // One process can open several Wayland connections (Wine). They must all be
+    // tracked: keying sessions by pid used to hide every connection but the
+    // last, which made a second window invisible to `list`/`target`.
+    {
+        auto first = std::make_shared<skl::wcas::proxy::ConnState>();
+        first->owner_pid = 4'242;
+        first->connected = true;
+        auto second = std::make_shared<skl::wcas::proxy::ConnState>();
+        second->owner_pid = 4'242;
+        second->connected = true;
+        skl::wcas::detail::register_session(4'242, first);
+        skl::wcas::detail::register_session(4'242, second);
+        std::size_t seen = 0;
+        for (const auto &session : skl::wcas::detail::sessions_for(4'242, "")) {
+            if (session->owner_pid == 4'242) ++seen;
+        }
+        assert(seen == 2);
+        skl::wcas::detail::erase_sessions_for(4'242);
+        assert(skl::wcas::detail::sessions_for(4'242, "").empty());
+    }
     return 0;
 }
