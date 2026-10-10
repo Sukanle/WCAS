@@ -507,6 +507,13 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
                 toplevel_it->second.title = value;
             else
                 toplevel_it->second.app_id = value;
+            if (toplevel_it->second.surface_id) {
+                auto &meta = state.surface_metadata[toplevel_it->second.surface_id];
+                if (opcode == 2)
+                    meta.title = value;
+                else
+                    meta.app_id = value;
+            }
         }
     }
 
@@ -910,6 +917,7 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
         if (role_enum == Role::Surface) {
             state.surface_to_toplevel.erase(role_id);
             state.surface_to_parent_surface.erase(role_id);
+            state.surface_metadata.erase(role_id);
             for (auto it = state.subsurface_to_surface.begin(); it != state.subsurface_to_surface.end();) {
                 if (it->second == role_id)
                     it = state.subsurface_to_surface.erase(it);
@@ -1188,6 +1196,19 @@ std::vector<WindowInfo> list_windows(const std::shared_ptr<ConnState> &state) {
         }
         return {};
     };
+    // Same walk, but falling back to the last name recorded for any surface in
+    // the parent chain whose toplevel has since been destroyed.
+    const auto stored_from = [&state](std::uint32_t sid) -> SurfaceMetadata {
+        for (int depth = 0; depth < 16 && sid; ++depth) {
+            if (const auto meta = state->surface_metadata.find(sid);
+                meta != state->surface_metadata.end() && (meta->second.app_id || meta->second.title))
+                return meta->second;
+            const auto parent = state->surface_to_parent_surface.find(sid);
+            if (parent == state->surface_to_parent_surface.end()) break;
+            sid = parent->second;
+        }
+        return {};
+    };
     std::unordered_set<std::uint32_t> listed;
     for (const auto &[tid, top] : state->toplevels) {
         (void)tid;
@@ -1244,7 +1265,12 @@ std::vector<WindowInfo> list_windows(const std::shared_ptr<ConnState> &state) {
         WindowInfo info;
         info.surface_id = sid;
         auto meta = inherited_from(sid);
-        if (!meta.app_id && !meta.title && sid == most_recent && sole_toplevel.has_value()) meta = *sole_toplevel;
+        // Only the most recently committed surface may claim a fallback name;
+        // older surfaces are stale leftovers and stay anonymous.
+        if ((!meta.app_id && !meta.title) && sid == most_recent) {
+            meta = stored_from(sid);
+            if ((!meta.app_id && !meta.title) && sole_toplevel.has_value()) meta = *sole_toplevel;
+        }
         if (meta.app_id || meta.title) {
             info.app_id = meta.app_id;
             info.title = meta.title;

@@ -225,6 +225,12 @@ struct ConnState {
     std::unordered_map<std::uint32_t, std::uint32_t> xdg_surface_to_surface;
     std::unordered_map<std::uint32_t, std::uint32_t> surface_to_toplevel;
     std::unordered_map<std::uint32_t, ToplevelState> toplevels;
+    /// Last known app_id/title per surface (recorded on set_title/set_app_id,
+    /// cleared on wl_surface.destroy). Used only to keep the *currently active*
+    /// rendering surface named after its toplevel is destroyed, so a briefly
+    /// toplevel-less window stays selectable without letting superseded stale
+    /// surfaces keep masquerading.
+    std::unordered_map<std::uint32_t, SurfaceMetadata> surface_metadata;
     /// `wl_subsurface` object -> the wl_surface it decorates, and the wl_surface
     /// of the `wl_subcompositor.get_subsurface` call. A rendering surface often
     /// never becomes a toplevel itself (games put their window content in a
