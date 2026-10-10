@@ -72,6 +72,9 @@ struct WCAS_API WindowInfo {
     int pid = 0;
     bool selected = false;
     WindowOrigin origin = WindowOrigin::Bare;
+    /// Wayland surface id within its session. Distinct windows can share
+    /// app_id/title, so this disambiguates entries in `list`.
+    std::uint32_t surface_id = 0;
 };
 /// Diagnostic view of every proxy session seen for this launch, including
 /// disconnected or unmatched ones (useful when a window seems to disappear).

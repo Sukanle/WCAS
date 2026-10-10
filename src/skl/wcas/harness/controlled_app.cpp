@@ -182,6 +182,7 @@ std::vector<WindowInfo> ControlledApp::windows() const {
             info.height = window.height;
             info.pid = static_cast<int>(session->owner_pid);
             info.origin = static_cast<WindowOrigin>(window.origin);
+            info.surface_id = window.surface_id;
             info.selected = active && active_surface == window.surface_id;
             out.push_back(std::move(info));
         }
