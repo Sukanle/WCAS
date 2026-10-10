@@ -92,6 +92,22 @@ struct WCAS_API SessionInfo {
     /// game connection apart from helper/CEF ones).
     std::string command;
 };
+/// Diagnostic view of one tracked Wayland surface, including surfaces that
+/// never became toplevels and never rendered (which `windows()` omits). Used to
+/// find a window whose metadata/role has not been established yet.
+struct WCAS_API SurfaceInfo {
+    int pid = 0;
+    std::uint32_t surface_id = 0;
+    std::uint32_t parent_surface_id = 0;
+    std::uint32_t toplevel_id = 0;
+    std::string role;
+    std::string app_id;
+    std::string title;
+    int width = 0;
+    int height = 0;
+    bool has_frame = false;
+    std::uint64_t last_commit_seq = 0;
+};
 class WCAS_API LaunchConfig {
 public:
     explicit LaunchConfig(std::string program);
@@ -189,6 +205,9 @@ public:
     /// Every proxy session seen for this launch (connected or not, matched or
     /// not) — diagnostics for why a window is missing.
     [[nodiscard]] std::vector<SessionInfo> sessions() const;
+    /// Every tracked surface (including non-toplevel, non-rendered ones) across
+    /// all sessions — diagnostics for locating a window that `windows()` omits.
+    [[nodiscard]] std::vector<SurfaceInfo> surfaces() const;
     /// Route capture and input to the window at `index` (from `windows()`).
     [[nodiscard]] result<void> select_window(int index);
     [[nodiscard]] result<void> move_mouse(double x, double y) const;

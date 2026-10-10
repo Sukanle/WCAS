@@ -224,7 +224,7 @@ result<ComputerUse> ComputerUse::create() {
             detail::register_session(credentials.pid, session);
             std::thread([client, upstream, session] {
                 proxy::Connection(client, upstream, session).run();
-                detail::erase_session(static_cast<pid_t>(session->owner_pid));
+                detail::erase_session(session);
             }).detach();
         }
     });
