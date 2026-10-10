@@ -194,7 +194,8 @@ std::vector<SessionInfo> ControlledApp::sessions() const {
     if (!impl_) return out;
     for (const auto &status : detail::session_status(impl_->child, impl_->match_regex)) {
         out.push_back(SessionInfo{static_cast<int>(status.owner_pid), status.connected, status.matched,
-            static_cast<int>(status.windows), static_cast<int>(status.surfaces), static_cast<int>(status.toplevels)});
+            static_cast<int>(status.windows), static_cast<int>(status.surfaces), static_cast<int>(status.toplevels),
+            status.command});
     }
     return out;
 }

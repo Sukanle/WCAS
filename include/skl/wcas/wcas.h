@@ -88,6 +88,9 @@ struct WCAS_API SessionInfo {
     /// surfaces==0 means no window was ever created on this connection.
     int surfaces = 0;
     int toplevels = 0;
+    /// Command line + executable of the owning process (diagnostic: tells the
+    /// game connection apart from helper/CEF ones).
+    std::string command;
 };
 class WCAS_API LaunchConfig {
 public:

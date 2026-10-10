@@ -30,6 +30,9 @@ struct SessionStatus {
     std::size_t windows = 0;
     std::size_t surfaces = 0;
     std::size_t toplevels = 0;
+    /// Command line + executable of the owning process, so callers can tell
+    /// which connection a session belongs to (the game vs a helper/CEF).
+    std::string command;
 };
 std::vector<SessionStatus> session_status(pid_t root, const std::string &match_regex);
 
