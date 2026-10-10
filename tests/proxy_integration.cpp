@@ -365,6 +365,7 @@ int main() {
         surf.committed_frame = skl::wcas::proxy::RetainedShm{};
         surf.committed_frame->width = 800;
         surf.committed_frame->height = 600;
+        surf.last_commit_seq = 999;
     }
 
     {
@@ -399,13 +400,13 @@ int main() {
         assert(state->toplevels.find(63) == state->toplevels.end());
         assert(state->surface_to_toplevel.find(60) == state->surface_to_toplevel.end());
     }
-    // The toplevel object is gone and there is no other named toplevel to
-    // attribute it to, so the surface is reported as an unnamed "bare"
-    // rendering surface rather than keeping a stale name.
+    // The toplevel object is gone, but this is still the actively rendered
+    // surface, so it keeps its last known name and stays selectable.
     for (const auto &window : skl::wcas::proxy::list_windows(state)) {
         if (window.surface_id == 61) {
-            assert(window.origin == skl::wcas::proxy::WindowOrigin::Bare);
-            assert(!window.app_id && !window.title);
+            assert(window.origin == skl::wcas::proxy::WindowOrigin::Subsurface);
+            assert(window.app_id && *window.app_id == "platformprocess.exe");
+            assert(window.title && *window.title == "UIPlatform");
         }
     }
 
