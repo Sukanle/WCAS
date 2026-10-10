@@ -52,7 +52,7 @@ void print_help() {
         "commands: screenshot|ss [now], up|w, down|s, left|a, right|d, center|c,\n"
         "          move <x> <y>, click [<x> <y>], cursor|pxy,\n"
         "          key|press <combo> (e.g. Enter, Space, ctrl+s, alt+F4), escape|esc, type <text>,\n"
-        "          list|ls, sessions, target <index|app_id|title>,\n"
+        "                    list|ls, sessions, surfaces, target <index|app_id|title>,\n"
         "          testdmabuf [<fd>], status, help|h, quit|exit|q\n"
         "          (ss waits for a freshly presented frame; `ss now` captures immediately)\n");
 }
@@ -390,6 +390,20 @@ int main(int argc, char **argv) {
                                                                               : "bare";
                     fmt::println("[{}]{} pid={} sid={} {}x{} [{}] app_id='{}' title='{}'", i, w.selected ? "*" : " ",
                         w.pid, w.surface_id, w.width, w.height, origin, w.app_id, w.title);
+                }
+            }
+            continue;
+        }
+        if (command == "surfaces") {
+            const auto surfaces = app.surfaces();
+            if (surfaces.empty()) {
+                fmt::println("no tracked surfaces");
+            } else {
+                for (const auto &s : surfaces) {
+                    fmt::println(
+                        "pid={} sid={} role='{}' parent={} toplevel={} {}x{} frame={} seq={} app_id='{}' title='{}'",
+                        s.pid, s.surface_id, s.role, s.parent_surface_id, s.toplevel_id, s.width, s.height,
+                        s.has_frame ? 1 : 0, s.last_commit_seq, s.app_id, s.title);
                 }
             }
             continue;
