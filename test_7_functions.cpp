@@ -400,8 +400,8 @@ int main(int argc, char **argv) {
                 fmt::println("no sessions");
             } else {
                 for (const auto &s : sessions) {
-                    fmt::println("pid={} connected={} matched={} windows={} surfaces={} toplevels={}", s.pid,
-                        s.connected, s.matched, s.windows, s.surfaces, s.toplevels);
+                    fmt::println("pid={} connected={} matched={} windows={} surfaces={} toplevels={} cmd='{}'", s.pid,
+                        s.connected, s.matched, s.windows, s.surfaces, s.toplevels, s.command);
                 }
             }
             continue;
