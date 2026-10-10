@@ -915,9 +915,27 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
             }
         }
         if (role_enum == Role::Surface) {
+            // A window's render surface is often a subsurface of the surface
+            // that carries the toplevel. When the shell surface is destroyed
+            // (popup dismissed, window recreated) the child keeps rendering, so
+            // hand it the last known name before dropping it; otherwise the
+            // still-visible window loses its identity.
+            if (const auto meta = state.surface_metadata.find(role_id); meta != state.surface_metadata.end()) {
+                for (const auto &[child, parent] : state.surface_to_parent_surface) {
+                    if (parent == role_id && state.surface_metadata.find(child) == state.surface_metadata.end())
+                        state.surface_metadata[child] = meta->second;
+                }
+            }
             state.surface_to_toplevel.erase(role_id);
-            state.surface_to_parent_surface.erase(role_id);
             state.surface_metadata.erase(role_id);
+            // Drop this surface as anyone's parent and as anyone's child.
+            state.surface_to_parent_surface.erase(role_id);
+            for (auto it = state.surface_to_parent_surface.begin(); it != state.surface_to_parent_surface.end();) {
+                if (it->second == role_id)
+                    it = state.surface_to_parent_surface.erase(it);
+                else
+                    ++it;
+            }
             for (auto it = state.subsurface_to_surface.begin(); it != state.subsurface_to_surface.end();) {
                 if (it->second == role_id)
                     it = state.subsurface_to_surface.erase(it);
