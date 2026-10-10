@@ -324,6 +324,16 @@ int main() {
     bind_global(app_pair[1], compositor_pair[1], 40, "wl_subcompositor", 5, 51);
     bind_global(app_pair[1], compositor_pair[1], 41, "xdg_wm_base", 5, 52);
 
+    // Create the shell surface (60) and its render child surface (61) so the
+    // proxy records their wl_surface role and can clean them up on destroy.
+    for (std::uint32_t sid : {60u, 61u}) {
+        auto create_surface = message(6, 0);   // wl_compositor.create_surface = "n"
+        put(create_surface, sid);
+        finish(create_surface);
+        send_message(app_pair[1], create_surface);
+        (void)receive(compositor_pair[1]);
+    }
+
     auto get_xdg_surface = message(52, 2);   // xdg_wm_base.get_xdg_surface = "no"
     put(get_xdg_surface, 62);
     put(get_xdg_surface, 60);
@@ -402,6 +412,25 @@ int main() {
     }
     // The toplevel object is gone, but this is still the actively rendered
     // surface, so it keeps its last known name and stays selectable.
+    for (const auto &window : skl::wcas::proxy::list_windows(state)) {
+        if (window.surface_id == 61) {
+            assert(window.origin == skl::wcas::proxy::WindowOrigin::Subsurface);
+            assert(window.app_id && *window.app_id == "platformprocess.exe");
+            assert(window.title && *window.title == "UIPlatform");
+        }
+    }
+
+    // Destroying the shell surface (60) must not rob the still-rendering child
+    // (61) of its name: the proxy hands the remembered metadata down first.
+    auto destroy_shell_surface = message(60, 0);   // wl_surface.destroy
+    finish(destroy_shell_surface);
+    send_message(app_pair[1], destroy_shell_surface);
+    (void)receive(compositor_pair[1]);
+    {
+        std::lock_guard lock(state->data_mutex);
+        assert(state->surface_metadata.find(60) == state->surface_metadata.end());
+        assert(state->surface_to_parent_surface.find(61) == state->surface_to_parent_surface.end());
+    }
     for (const auto &window : skl::wcas::proxy::list_windows(state)) {
         if (window.surface_id == 61) {
             assert(window.origin == skl::wcas::proxy::WindowOrigin::Subsurface);
