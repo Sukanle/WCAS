@@ -2,69 +2,131 @@
 
 **W**indow **C**ontrol **A**gent **S**ystem · 窗口控制代理系统
 
-跨平台窗口捕获 / 输入注入 / 进程劫持库。当前仅初步实现 **Wayland (Linux)** 路径，
-WinAPI 与 Cocoa 后端尚未开始。
+一个**独立的**跨平台窗口捕获 / 输入注入 / 进程劫持库。
+当前只实现了 **Linux / Wayland** 路径；WinAPI 与 Cocoa 后端尚未开始。
 
-> **项目状态：早期实验性（early / experimental）。** API 尚未发布，允许破坏性变更。
-> Wayland 代理的核心链路已可用，KMS 抓取、XWayland 完整回退等功能仍在补全。
+> **状态：早期实验性。** 尚未发布 API，允许破坏性变更。Wayland 核心链路已可用，
+> KMS、XWayland 完整回退、后台截图调度等仍在补全。
 
 ---
 
-## 这是什么
+## 一、项目理念
 
-WCAS 启动一个目标应用，并在它与合成器之间插入一个**私有 Wayland 代理**。
-代理按 wire 协议双向转发消息，同时观察并记录该应用的全部窗口状态。
-调用方因此可以在不依赖合成器私有协议、不使用 X11 的前提下：
+桌面自动化的核心矛盾是：**你想控制某个应用，但显示协议不允许你从外部控制它。**
 
-- **捕获窗口画面** —— `wl_shm` 或 DMA-BUF（含 Vulkan 导入）两种路径
-- **注入输入** —— 鼠标移动/点击/拖拽/滚轮、按键组合、Unicode 文本
-- **枚举与切换窗口** —— 一个应用的多进程、多 surface、多输出窗口均可列出并指定目标
+- X11 时代，任意客户端都能抓屏、合成事件、枚举窗口——于是自动化很容易，也很不安全。
+- Wayland 出于安全考虑，把这些能力从客户端手里收走了：应用只能看到自己的 surface，
+  输入只能由合成器注入，窗口列表只有合成器知道。
+
+WCAS 的做法是**换一个信任边界**：不去对抗 Wayland 的安全模型，而是**自己启动目标应用**，
+在应用与真实合成器之间插入一个**私有 Wayland 代理**。对应用来说，它就是合成器；
+对真实合成器来说，它是唯一的客户端。于是 WCAS 能在**协议层**看见并改写这条连接上的
+一切，而无需 root、无需合成器私有接口、无需 X11。
+
+由此得到三条设计原则：
+
+1. **只控制自己启动的进程树。** WCAS 不接管桌面上已有的窗口，也不做全桌面捕获。
+   这让它可以安全地跑在用户的日常会话里，而不会变成一个“屏幕监控器”。
+2. **协议感知，而非像素代理。** 代理按 wire opcode/签名翻译消息，理解 surface、
+   buffer、toplevel 的语义，而不是盲转字节。窗口枚举、缩放换算、截图目标选择都建立在
+   这份语义之上。
+3. **真实合成器为准。** 所有“是否可用”的判定都以真实 compositor 的行为为准；
+   fake compositor 测试能覆盖协议，但覆盖不了 ID 连续性、缩放、异步 DMA-BUF 等真机细节。
+
+### 理论模型
+
+```
+应用 ──(WAYLAND_DISPLAY)──▶ 私有代理 ──(wl_display)──▶ 真实合成器
+                               │
+                               ├─ 双向对象 ID 空间（app ⇄ upstream）
+                               ├─ 参数/FD(new_id, SCM_RIGHTS) 翻译
+                               ├─ surface / buffer / toplevel 观察
+                               └─ 截图与输入注入的注入点
+```
+
+代理为每条应用连接建立一条独立的 upstream 连接。`new_id` 在 upstream 侧使用**恒等映射**，
+因为真实 Wayland server 用 `wl_map_insert_at` 校验客户端 `new_id` 必须落在其分配器水位之下
+（即 ID 必须连续）——高位基址或独立计数器都会漂移而被拒绝。这一点只有真实合成器才会暴露。
+
+## 二、这是什么 / 与其他方案的区别
+
+WCAS 启动一个目标应用，并在它与合成器之间插入私有 Wayland 代理，从而可以：
+
+- **捕获窗口画面** —— `wl_shm` 或 DMA-BUF（Vulkan 导入优先，线性 mmap 回退）
+- **注入输入** —— 鼠标移动/点击/长按滑动/滚轮、按键与组合键、Unicode 文本
+- **枚举与切换窗口** —— 一个应用的多进程、多 surface 窗口均可列出并指定目标
 - **跟踪几何与光标** —— frame 像素与 surface 逻辑像素之间的正确换算
 
-典型场景是游戏与 GUI 的桌面自动化：让 agent 启动一个应用、看清它的画面、
-再把操作打回它的窗口里。
+| 方案 | 截图范围 | 需要 X11 | 需要改动被控应用 |
+| --- | --- | --- | --- |
+| grim / spectacle / gnome-screenshot | 整屏或单窗口（依赖合成器工具） | 否 | 否 |
+| X11 + XComposite | 单窗口 | **是** | 否 |
+| **WCAS** | **被启动应用的窗口** | 否（XWayland 仅作回退） | 否，但**必须由 WCAS 启动** |
 
-## 与其他方案的区别
+典型场景：让自动化 agent 启动一个游戏或 GUI，看清它的画面，再把操作打回它的窗口里。
 
-|                                     | 截图范围                       | 是否需要 X11            | 是否需改动被控应用         |
-| ----------------------------------- | ------------------------------ | ----------------------- | -------------------------- |
-| grim / spectacle / gnome-screenshot | 整屏或单窗口（依赖合成器工具） | 否                      | 否                         |
-| X11 + XComposite                    | 单窗口                         | **是**                  | 否                         |
-| **WCAS**                            | **被启动应用的窗口**           | 否（XWayland 仅作回退） | 否，但**必须由 WCAS 启动** |
+## 三、技术路线
 
-关键差异：WCAS **不接管桌面上已存在的窗口**，只控制自己启动的进程树。
-这让它天然适合自动化流水线（CI、无头合成器、测试），而不会干扰用户正在使用的会话。
+WCAS 分阶段推进，每一阶段都要有对应测试通过后才算完成：
 
-## 当前能力
+| 阶段 | 内容 | 状态 |
+| --- | --- | --- |
+| 1 | 协议感知代理：registry 过滤、对象映射、参数/FD 翻译、surface/commit 观察 | 完成 |
+| 2 | `wl_shm` 捕获：pool/buffer 生命周期、mmap 解码、目标选择、retained frame | 完成 |
+| 2b | wire 元数据重建：由协议 XML 生成完整 opcode/签名/`new_id` 目标表 | 完成 |
+| 3 | 输入：keymap、xkbcommon 布局、修饰键、Unicode、text-input-v3、指针/滚轮/拖拽 | 完成 |
+| 4 | DMA-BUF 与 GPU 捕获：Vulkan 导入、线性回退、reactor + 三槽调度、窗口几何 | 大部分完成 |
+| 4b | KMS：直接 DRM/KMS ioctl（去掉外部 helper 依赖） | **暂缓** |
+| 5 | XWayland：独立 Xwayland bridge、native 失败回退、XComposite 捕获 | 部分完成 |
+| 6 | CLI 与脚本：全部参数、窗口管理、长按/滑动、显示器、诊断 | 进行中 |
+
+关键技术决策：
+
+- **wire 元数据在构建期生成。** libwayland 的 `wl_interface` 是客户端接口表（`release`/
+  `destroy` 与相邻 opcode 合并），**不能**用于 wire 翻译；系统 `wayland.xml` 也不完整
+  （`wl_registry.bind` 缺 `interface`/`version` 参数）。因此由 `codegen/` 在构建期从
+  `wayland.xml` + `wayland-server-protocol.h` + `wayland-protocols/` 生成权威表。
+- **异步 DMA-BUF。** Wine/winewayland 走 `zwp_linux_buffer_params_v1.create`（不携带
+  `new_id`），`wl_buffer` 在稍后的 `created` 事件才下发；代理必须在 `create` 暂存参数、
+  在 `created` 注册 buffer，否则 `capturable_surface` 永远为假。
+- **坐标空间。** 捕获到的是 frame（buffer）像素，而 `wl_pointer` 是 surface-local 逻辑像素；
+  代理跟踪 `wp_viewport.set_destination`、`wl_surface.set_buffer_scale`、
+  `wp_fractional_scale_v1` 得到比例，输入时换算、查询光标时反算。
+- **实时性。** 以 `wl_surface.frame` → `wl_callback.done`（“新帧已上屏”）作为屏障，
+  而不是仅看 commit 计数；`ss` 默认等待新帧，`ss now` 立即截图。
+
+## 四、当前能力
 
 ### 已实现（Wayland）
 
-- **协议感知代理** —— 按 wire opcode/签名翻译 core Wayland 与 47 个扩展协议接口，
-  处理 `new_id`、`SCM_RIGHTS` FD 转发、双向对象 ID 映射、registry allowlist/denylist
-- **截图** —— `wl_shm`（mmap ARGB/XRGB）与 DMA-BUF（Vulkan 导入优先，线性 mmap 回退）双后端
-- **输入注入** —— keymap（xkbcommon）解析按键与修饰键、Unicode 文本（优先 text-input-v3）、
-  pointer / scroll / drag 全套事件
-- **窗口管理** —— `windows()` 枚举进程树内全部窗口；`select_window()` 按索引/app_id/标题切换目标
-- **坐标换算** —— 跟踪 `wp_viewport`、`set_buffer_scale`、`wp_fractional_scale_v1`，
-  在 frame 像素与 surface-local 逻辑像素之间正确转换，支持多屏不同缩放
-- **实时性** —— 以 `wl_surface.frame` / `wl_callback.done` 作为"新帧已上屏"屏障
-- **XWayland 回退** —— native Wayland 超时后启动独立 Xwayland bridge 并经 XComposite 捕获
-- **进程管理** —— 独立 process group、`PR_SET_PDEATHSIG`、`SIGINT`→`SIGTERM`→`SIGKILL` 顺序清理
+- **协议感知代理** —— 翻译 core Wayland 与 47 个扩展协议接口，处理 `new_id`、
+  `SCM_RIGHTS` FD 转发、双向对象 ID 映射、registry allowlist/denylist
+- **截图** —— `wl_shm`（mmap ARGB/XRGB）与 DMA-BUF（Vulkan 导入优先，线性 mmap 回退）
+- **输入注入** —— keymap（xkbcommon）解析按键/修饰键、Unicode 文本（优先 text-input-v3）、
+  pointer / scroll / drag、长按、长按滑动
+- **窗口管理** —— 枚举进程树内全部窗口（含同一进程的多条 Wayland 连接）、按索引/app_id/标题
+  切换目标、标注窗口来源（toplevel / subsurface / bare）
+- **坐标换算** —— frame 像素与 surface 逻辑像素互换，支持多屏不同缩放
+- **XWayland 回退** —— native 超时后启动独立 Xwayland bridge 并经 XComposite 捕获
+- **进程管理** —— 独立 process group、`PR_SET_PDEATHSIG`、`SIGINT`→`SIGTERM`→`SIGKILL`
+  顺序清理，退出时 join 代理线程
 
 ### 尚未完成
 
-| 能力              | 说明                                                                        |
-| ----------------- | --------------------------------------------------------------------------- |
-| WinAPI 后端       | 计划中，未开始                                                              |
-| Cocoa 后端        | 计划中，未开始                                                              |
-| KMS 抓取          | 暂缓。现有实现依赖 libdrmtap 与 `CAP_SYS_ADMIN`，后续改为直接 DRM/KMS ioctl |
-| 后台三槽调度      | `capture_slot` / `capture_scheduler` 已实现但未接线到 `launch()` 流程       |
-| XWayland 完整回退 | `content_timeout` 未接入 capture，X11-only 客户端端到端未验证               |
-| 负向协议测试      | 未知 opcode / 版本越界 / 畸形签名                                           |
+| 能力 | 说明 |
+| --- | --- |
+| WinAPI 后端 | 计划中，未开始 |
+| Cocoa 后端 | 计划中，未开始 |
+| 多平面 / YUV DMA-BUF | `capture_dmabuf` 目前只支持单平面 RGB |
+| KMS 抓取 | 暂缓；现有实现依赖 libdrmtap 与 `CAP_SYS_ADMIN`，后续改为直接 DRM/KMS ioctl |
+| 后台三槽调度 | `capture_slot` / `capture_scheduler` 已实现但未接线到 `launch()` 流程 |
+| XWayland 完整回退 | `content_timeout` 未接入 capture，X11-only 客户端端到端未验证 |
+| 负向协议测试 | 未知 opcode / 版本越界 / 畸形签名 |
 
-## 架构
+## 五、架构
 
 ```mermaid
+%%{init: {"theme": "dark", "themeVariables": {"fontColor": "#E8EAED", "primaryTextColor": "#E8EAED", "lineColor": "#9AA0A6", "clusterBkg": "#202124", "clusterBorder": "#5F6368"}}}%%
 flowchart TB
     caller["调用方<br/>C++ / FFI"]
 
@@ -92,171 +154,195 @@ flowchart TB
     style api fill:#35363A,stroke:#9AA0A6,color:#E8EAED
 ```
 
-代理的双向 ID 空间彼此独立；`new_id` 在 upstream 侧使用**恒等映射**，
-因为真实 Wayland server 要求客户端 ID 连续（这一点在真实合成器上才会暴露，
-fake compositor 测试无法覆盖）。
-
-## 构建
+## 六、开发与依赖
 
 ### 依赖
 
-- CMake ≥ 3.20、Ninja、Python 3（构建期生成 wire 元数据）
-- OpenCV、Boost（filesystem / system / program_options）、fmt
-- libwayland（client + server）、xkbcommon
-- xcb、xcb-composite、Vulkan、liburing、libdrm ≥ 2.4.95
-- `wayland.xml`、`wayland-protocols/` 与 `wayland-server-protocol.h`（用于生成 wire 元数据）
+- 构建：CMake ≥ 3.20、Ninja、Python 3（构建期生成 wire 元数据）
+- 库：OpenCV（core/imgcodecs/imgproc）、Boost（filesystem/system/program_options）、fmt
+- 协议：libwayland（client + server）、xkbcommon、xcb + xcb-composite
+- GPU：Vulkan、libdrm ≥ 2.4.95、liburing
+- 生成元数据所需：`wayland.xml`、`wayland-protocols/`、`wayland-server-protocol.h`
+- 子模块：`third_party/libdrmtap`（MIT）
 
-### 构建与测试
+初始化子模块：
 
-```bash
-cmake -DCMAKE_BUILD_TYPE=Debug -B build/Debug -G Ninja -S .
+```sh
+git submodule update --init --recursive
+```
+
+### 构建
+
+```sh
+cmake -B build/Release -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build/Release --parallel
+```
+
+开发/调试时可用 `Debug`：
+
+```sh
+cmake -B build/Debug -S . -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/Debug --parallel
 ctest --test-dir build/Debug --output-on-failure
 ```
 
-> 请始终使用带 `-G Ninja` 的**独立构建目录**。仓库历史中曾因混用旧的
-> `Unix Makefiles` 产物导致误判"协议元数据损坏"，实际是陈旧二进制的问题。
+> 始终使用**独立构建目录**。历史上曾因混用旧的构建产物误判“协议元数据损坏”。
 
-第三方子模块：
+## 七、如何使用
 
-```bash
-git submodule update --init --recursive
+### 7.1 通过 Proton 包装脚本（推荐）
+
+`proton-inject.sh` 会自动设置 `WINEPREFIX`、`WAYLAND_DISPLAY` 指向私有代理，
+并按目标程序推断匹配规则。常用示例：
+
+明日方舟（手游移植，OpenGL / WineD3D）：
+
+```sh
+./proton-inject.sh /<Proton游戏容器根路径>/drive_c/Program\ Files/Hypergryph\ Launcher/games/Arknights/Arknights.exe --graphics-api opengl --cli
 ```
 
-## 使用
+明日方舟：终末地（原生 PC 端，DXVK / Vulkan）：
 
-### C++ API
-
-```cpp
-#include <skl/wcas/wcas.h>
-
-using namespace skl::wcas;
-
-ComputerUseBuilder builder;
-auto cu = builder.build().value();
-
-LaunchConfig config("/path/to/app");
-config.env("WINEPREFIX", "/path/to/prefix")
-    .graphics_api(GraphicsApi::opengl)
-    // 可选：纳入非直接子进程的后续窗口（如游戏的公告层进程）
-    .match_regex("MyGame");
-
-auto app = cu->launch(config).value();
-app.set_capture_backend(CaptureBackend::dmabuf);
-
-// 枚举窗口并选择目标
-for (const auto& w : app.windows()) {
-    fmt::print("[{}] {}x{} pid={} {}\n", w.app_id, w.width, w.height, w.pid, w.title);
-}
-app.select_window(0);
-
-// 截图
-auto frame = app.capture().value();
-cv::imwrite("shot.png", frame.image);
-
-// 输入
-app.move_mouse(960.0, 540.0);
-app.click(960.0, 540.0);
-app.press_key("ctrl+s");
-app.type_text("hello");
+```sh
+./proton-inject.sh /<Proton游戏容器根路径>/hypergryph/drive_c/Program\ Files/Hypergryph\ Launcher/games/Arknights\ Endfield/Endfield.exe --bridge-width 3840 --bridge-height 2160 --graphics-api dxvk --cli
 ```
 
-主要接口：
+Lutris 用 `proton-inject-lutris.sh`。
 
-| 分类     | 接口                                                                                      |
-| -------- | ----------------------------------------------------------------------------------------- |
-| 生命周期 | `ComputerUse::launch`、`ControlledApp::stop`、`is_alive`、`transport`                     |
-| 捕获     | `capture`、`set_capture_backend`、`frame_size`、`presented_frames`                        |
-| 输入     | `move_mouse`、`click`、`click_with_modifiers`、`scroll`、`drag`、`press_key`、`type_text` |
-| 窗口     | `windows`、`sessions`、`select_window`、`set_capture_target`                              |
-| 光标     | `cursor_position`                                                                         |
+### 7.2 直接用 CLI
 
-### 命令行
-
-```bash
-build/Debug/wcas-test-7-functions \
+```sh
+build/Release/wcas-test-7-functions \
   --program /path/to/app --umu \
   --env WINEPREFIX=/path/to/prefix \
   --capture-backend dmabuf --graphics-api opengl \
-  --native-timeout 25 -c
+  --native-timeout 25 --cli
 ```
 
-CLI 模式下可用命令：
+主要启动参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--program, -p` | 要启动的可执行文件 |
+| `--arg, -s` / `--env, -e` | 传给程序的参数 / 环境变量（可重复） |
+| `--proton` / `--wine` / `--umu` | 启动方式 |
+| `--graphics-api, -g` | `vulkan`(`vk`/`dxvk`) 或 `opengl`(`gl`/`wined3d`) |
+| `--capture-backend, -b` | `client`(默认) / `shm` / `dmabuf` / `kms` |
+| `--bridge-width/-height, -x/-y` | XWayland 回退桥接分辨率 |
+| `--match-regex, -r` | 额外的子窗口进程匹配正则（默认取目标程序父目录） |
+| `--output` | 启动后把窗口移到指定 Hyprland 显示器（如 `DP-2`） |
+| `--key-delay` | 发送 key 前等待秒数（便于手动聚焦） |
+| `--allow-activation` | 放行选中窗口的激活请求，使其接收键盘（会夺取焦点） |
+| `--debug-all` | 打开调试输出 |
+
+CLI 模式下的命令：
 
 ```
-screenshot|ss [now]        截图（默认等待新帧；ss now 立即截图）
-list|ls                    列出窗口，* 标记当前目标
-sessions                   列出全部代理会话（诊断用）
+screenshot|ss [now]          截图（默认等待新帧；ss now 立即截图）
+list|ls                      列出窗口，* 标记当前目标
+sessions                     列出全部代理会话（含 kbd/ptr/keymap 诊断）
+surfaces                     列出全部 surface（role/parent/toplevel/frame/seq）
 target <index|app_id|title>  切换目标窗口
-move <x> <y> / click        移动与点击
-up|down|left|right|center   相对/绝对移动
-key|press <combo>          任意组合键，如 ctrl+s、alt+F4
-escape|esc / type <text>   单键与文本输入
-cursor|pxy                 打印当前光标位置
-status                     进程、transport、commit/frame 计数、窗口尺寸
+move <x> <y>                 移动到坐标
+click [<x> <y>]              在坐标点击（省略坐标则点当前位置）
+click <hold> <Top|Down|Left|Right|Center> [px]
+                             长按滑动，如 `click 4s R 300`
+up|down|left|right|center    相对移动 / 居中
+key|press <combo> [hold]     组合键，如 `key ctrl+s`、`key Alt-C`、`key Enter 3s`
+escape|esc / type <text>     单键与文本输入
+cursor|pxy                   打印当前光标位置
+monitor <DP-1|DP-2|...>      把选中窗口移到指定 Hyprland 显示器
+activation on|off            放行/禁止选中窗口的激活请求
+status                       进程、transport、commit/frame 计数、窗口尺寸
+help|h / quit|exit|q
 ```
 
-### Proton / Wine 游戏
+常用工作流：
 
-仓库提供开箱即用的包装脚本：
-
-```bash
-./proton-inject.sh          # Steam Proton（默认 DW-Proton，支持 dw/ge/cachyos/office/auto）
-./proton-inject-lutris.sh   # Lutris
+```
+list                 # 看有哪些窗口
+target 1             # 选中主窗口
+ss                   # 截一张图（等待新帧）
+click 4s R 300       # 长按 4 秒并向右滑 300px
+key Alt-C            # 发送 Alt+C
 ```
 
-更完整的集成说明见 [docs/Proton.md](docs/Proton.md)。
+## 八、现有问题
 
-## 安全模型
+### 8.1 明日方舟（手游移植）按键无效
 
-WCAS 会代理显示协议并合成输入，因此属于**安全敏感基础设施**。
-涉及认证、协议过滤、进程归属或清理的改动需要显式的安全评审。
+现象：主窗口（`Arknights.exe` / 明日方舟）**鼠标点击正常，但按键无效**（例如 Esc 不触发返回）。
 
-核心约束：
+排查结论：**不是 WCAS 注入层的问题。** 用自建 native 探针验证，注入完全正确：
 
-- 仅接受**同 UID** 的对端（依据内核 `SO_PEERCRED`）
-- 私有 Wayland socket 权限为 `0600`
+- `key Enter 1s` → 客户端收到 `wl_keyboard.key key=28`（evdev Return）按下…释放
+- `key Alt-C 500ms` → `Alt`(56)↓、`c`(46)↓↑、`Alt`↑
+
+同一套注入在其它游戏、以及 Qt/GTK/Electron 等应用上均正常。明日方舟 PC 端是从手游移植，
+其键盘处理（很可能走 RawInput / 只认真实前台窗口）比原生 PC 端（如终末地）弱，
+对合成注入不响应。**这是游戏自身的行为，非 WCAS 缺陷。**
+
+已知缓解手段（均未能让明日方舟响应合成按键，但值得记录）：
+
+- `--allow-activation`：放行选中窗口的 `xdg_activation_v1.activate`，使其被合成器激活；
+- `--key-delay N`：发送前等待，手动聚焦窗口；
+- `activation on` + 点击窗口后再按键。
+
+后续可能的方向：改走 X11/XWayland 注入（Wine 对 X11 输入处理更成熟），或在合成器层
+真正激活窗口后再注入。
+
+### 8.2 其它已知限制
+
+- **多平面 / YUV DMA-BUF** 不支持，遇到会捕获失败。
+- **KMS 抓取**依赖外部权限，暂缓。
+- **XWayland 完整回退**未端到端验证。
+- 某些应用（如公告层、CEF）会**泄漏大量 surface** 且从不销毁；WCAS 用提交新近度区分活跃窗口，
+  但历史 surface 仍会累积。
+- **激活与不抢焦点天生冲突**：要让 Unity/Wine 收键通常需要窗口被激活，而激活会带走用户焦点。
+  新窗口抢焦点主要是合成器（如 Hyprland 默认聚焦新 toplevel）行为，可用窗口规则缓解：
+
+  ```conf
+  misc {
+      focus_on_activate = false
+      initial_workspace_tracking = 0
+  }
+  windowrulev2 = noinitialfocus, class:^(arknights\.exe)$
+  ```
+
+## 九、安全模型
+
+WCAS 代理显示协议并合成输入，属于**安全敏感基础设施**。涉及认证、协议过滤、进程归属或
+清理的改动需要显式评审。核心约束：
+
+- 仅接受**同 UID** 的对端（内核 `SO_PEERCRED`）
+- 私有 Wayland socket 权限 `0600`
 - 永不向客户端暴露特权（跨客户端）Wayland 接口
 - **不实现**环境级全桌面捕获
 - 受控子进程设置 `PR_SET_PDEATHSIG` 并被显式回收
 
-WCAS **不**为受控应用提供沙箱。被控应用仍拥有调用方用户的全部
-文件系统、网络与 D-Bus 权限，除非调用方另行提供隔离。
-WCAS 也**不是**用来隐藏窗口的——被控进程对桌面用户依然可见。
+WCAS **不**为受控应用提供沙箱：被控应用仍拥有调用方用户的全部文件系统、网络与 D-Bus 权限，
+除非调用方另行隔离。WCAS 也**不是**用来隐藏窗口的——被控进程对桌面用户依然可见。
 
-漏洞请通过 GitHub 私有漏洞报告渠道提交，勿公开开 issue。
-
-## 项目结构
+## 十、项目结构
 
 ```
 include/skl/wcas/     公共头文件（wcas.h 为主要 API）
 src/skl/wcas/
-  proxy/              Wayland 代理：reactor、wire 翻译、surface 观察、输入、截图槽位
+  proxy/              Wayland 代理：reactor、wire 翻译、interfaces、surface 观察、
+                      输入、截图槽位、Vulkan DMA-BUF 导入
   harness/            ComputerUse（启动器）、ControlledApp（控制）、session（会话表）
   xwayland.cpp        XWayland bridge
   x11_capture.cpp     X11/XComposite 抓取
   drm.cpp             DRM/KMS 与窗口几何
-  vulkan_dmabuf.cpp   Vulkan DMA-BUF 导入
+  dmabuf_probe.cpp    DMA-BUF 能力探测
 codegen/              由协议 XML 生成 wire 元数据（构建期执行）
 tests/                单元测试与协议集成测试（fake Wayland 环境）
-docs/                 兼容性矩阵、FFI、Proton 集成、安全策略
+docs/                 旧文档（含参考实现内容），待重写为原生文档
 proton-inject*.sh     Proton / Lutris 启动包装
 ```
 
-## 文档
-
-| 文件                                             | 内容                                    |
-| ------------------------------------------------ | --------------------------------------- |
-| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)   | compositor / toolkit 兼容矩阵与支持分级 |
-| [docs/Proton.md](docs/Proton.md)                 | Proton/Wine 游戏自动化集成指南          |
-| [docs/FFI.md](docs/FFI.md)                       | 从 C/Python/Node/Go/JVM 封装的 FFI 约定 |
-| [docs/SECURITY.md](docs/SECURITY.md)             | 安全边界与漏洞报告方式                  |
-| [docs/MAA-COMPARISON.md](docs/MAA-COMPARISON.md) | 与 MAA Linux 控制器的差异对比           |
-
-## 许可
+## 十一、许可
 
 本项目采用 [Apache License 2.0](LICENSE) 开源，Copyright 2026 Sukanle。
-第三方组件的归属声明见 [NOTICE](NOTICE)。
-
-依赖 `third_party/libdrmtap` 为独立子模块（MIT 许可证），
-在构建时以 `SHARED` 方式链接，不并入本仓库源码。
+第三方组件归属见 [NOTICE](NOTICE)。`third_party/libdrmtap` 为独立子模块（MIT），
+构建时以 `SHARED` 方式链接，不并入本仓库源码。
