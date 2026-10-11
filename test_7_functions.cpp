@@ -6,6 +6,8 @@
 #include <fmt/std.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <chrono>
 #include <optional>
 #include <filesystem>
@@ -50,19 +52,57 @@ std::optional<CaptureBackend> parse_backend(const std::string &value) {
 void print_help() {
     fmt::print(
         "commands: screenshot|ss [now], up|w, down|s, left|a, right|d, center|c,\n"
-        "          move <x> <y>, click [<x> <y>], cursor|pxy,\n"
+        "          move <x> <y>, click [<x> <y>] | click <hold> <Top|Down|Left|Right|Center> [px], cursor|pxy,\n"
         "          key|press <combo> (e.g. Enter, Space, ctrl+s, alt+F4), escape|esc, type <text>,\n"
         "                    list|ls, sessions, surfaces, target <index|app_id|title>,\n"
+        "                    activation on|off (allow the selected window to be activated for keyboard),\n"
+        "                    monitor <DP-1|DP-2|HDMI-A-1> (move selected window via Hyprland),\n"
         "          testdmabuf [<fd>], status, help|h, quit|exit|q\n"
         "          (ss waits for a freshly presented frame; `ss now` captures immediately)\n");
 }
 
 }   // namespace
 
+/// Parse a trailing hold duration such as `3s`, `500ms`, `2m`, `1.5s`.
+std::optional<std::chrono::milliseconds> parse_hold(const std::string &token) {
+    std::string number;
+    std::string unit;
+    for (const char c : token) {
+        if (std::isdigit(static_cast<unsigned char>(c)) || c == '.')
+            number += c;
+        else
+            unit += c;
+    }
+    if (number.empty() || unit.empty()) return std::nullopt;
+    double value = 0.0;
+    try {
+        value = std::stod(number);
+    } catch (...) {
+        return std::nullopt;
+    }
+    if (unit == "ms") return std::chrono::milliseconds(static_cast<long long>(value));
+    if (unit == "s") return std::chrono::milliseconds(static_cast<long long>(value * 1000.0));
+    if (unit == "m") return std::chrono::milliseconds(static_cast<long long>(value * 60'000.0));
+    return std::nullopt;
+}
+
+/// Move the window whose app_id is `cls` to monitor `monitor` using Hyprland's
+/// IPC. Wayland gives a client no way to place its own window, so this is
+/// compositor-specific (Hyprland only); it fails quietly elsewhere.
+int hyprctl_move_to_monitor(const std::string &cls, const std::string &monitor) {
+    if (cls.empty() || monitor.empty()) return -1;
+    const std::string focus = "hyprctl dispatch focuswindow class:^(" + cls + ")$ >/dev/null 2>&1";
+    const std::string move = "hyprctl dispatch movewindow mon:" + monitor + " >/dev/null 2>&1";
+    return std::system((focus + "; " + move).c_str());
+}
+
 int main(int argc, char **argv) {
     std::string program;
     std::string mode = "native";
     bool cli = false;
+    bool allow_activation = false;
+    double key_delay = 0.0;
+    std::string output_monitor;
     bool inherit_output = false;
     bool gpu_accelerated = false;
     std::vector<std::string> args;
@@ -91,6 +131,12 @@ int main(int argc, char **argv) {
         ("arg,s", po::value<std::vector<std::string>>(&args), "argument passed to the program (repeatable)")
         ("env,e", po::value<std::vector<std::string>>(), "environment variable KEY=VALUE (repeatable)")
         ("cli,c", po::bool_switch(&cli), "use CLI mode")
+        ("allow-activation", po::bool_switch(&allow_activation),
+            "forward the selected window's activation so it accepts keyboard input (steals focus)")
+        ("key-delay", po::value<double>(&key_delay)->default_value(0.0),
+            "seconds to wait before injecting a key, to focus the window manually first")
+        ("output", po::value<std::string>(&output_monitor),
+            "move the game's windows to this Hyprland monitor (e.g. DP-2, HDMI-A-1)")
         ("output-dir,o", po::value<std::string>(&output_dir)->default_value(output_dir), "output directory")
         ("bridge-width,x", po::value<int>(&bridge_width)->default_value(bridge_width), "bridge width")
         ("bridge-height,y", po::value<int>(&bridge_height)->default_value(bridge_height), "bridge height")
@@ -246,6 +292,27 @@ int main(int argc, char **argv) {
     }
     auto app = std::move(launched.value());
     app.set_capture_backend(capture_backend);
+    app.set_allow_activation(allow_activation);
+
+    // Optionally move the app's windows onto a specific Hyprland monitor. The
+    // window may not exist immediately, so poll briefly for one.
+    if (!output_monitor.empty()) {
+        for (int attempt = 0; attempt < 40; ++attempt) {
+            std::string cls;
+            for (const auto &w : app.windows()) {
+                if (!w.app_id.empty()) {
+                    cls = w.app_id;
+                    break;
+                }
+            }
+            if (!cls.empty()) {
+                const int rc = hyprctl_move_to_monitor(cls, output_monitor);
+                fmt::println("output: moved '{}' to {} ({})", cls, output_monitor, rc == 0 ? "ok" : "failed");
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        }
+    }
 
     fmt::println("started pid= {} socket= {} transport= {}", app.pid(), harness.value().socket_name(),
         (app.transport() == Transport::xwayland ? "xwayland" : "native"));
@@ -408,14 +475,59 @@ int main(int argc, char **argv) {
             }
             continue;
         }
+        if (command == "activation") {
+            std::string value;
+            input >> value;
+            if (value == "on") {
+                allow_activation = true;
+            } else if (value == "off") {
+                allow_activation = false;
+            }
+            app.set_allow_activation(allow_activation);
+            fmt::println("activation = {}", allow_activation ? "on" : "off");
+            continue;
+        }
+        if (command == "monitor" || command == "output") {
+            std::string name;
+            input >> name;
+            if (name.empty()) {
+                fmt::println(stderr, "usage: monitor <DP-1|DP-2|HDMI-A-1|...>");
+                continue;
+            }
+            std::string cls;
+            for (const auto &w : app.windows()) {
+                if (w.selected && !w.app_id.empty()) {
+                    cls = w.app_id;
+                    break;
+                }
+            }
+            if (cls.empty()) {
+                for (const auto &w : app.windows()) {
+                    if (!w.app_id.empty()) {
+                        cls = w.app_id;
+                        break;
+                    }
+                }
+            }
+            if (cls.empty()) {
+                fmt::println("monitor: no window with an app_id (run `list`)");
+                continue;
+            }
+            const int rc = hyprctl_move_to_monitor(cls, name);
+            fmt::println("monitor: '{}' -> {} ({})", cls, name, rc == 0 ? "ok" : "failed");
+            continue;
+        }
         if (command == "sessions") {
             const auto sessions = app.sessions();
             if (sessions.empty()) {
                 fmt::println("no sessions");
             } else {
                 for (const auto &s : sessions) {
-                    fmt::println("pid={} connected={} matched={} windows={} surfaces={} toplevels={} cmd='{}'", s.pid,
-                        s.connected, s.matched, s.windows, s.surfaces, s.toplevels, s.command);
+                    fmt::println(
+                        "pid={} connected={} matched={} windows={} surfaces={} toplevels={} kbd={} ptr={} keymap={} "
+                        "cmd='{}'",
+                        s.pid, s.connected, s.matched, s.windows, s.surfaces, s.toplevels, s.has_keyboard ? 1 : 0,
+                        s.has_pointer ? 1 : 0, s.has_keymap ? 1 : 0, s.command);
                 }
             }
             continue;
@@ -489,6 +601,87 @@ int main(int argc, char **argv) {
         if (command == "move" || command == "click") {
             refresh_frame_size();
             sync_cursor_from_device();
+
+            if (command == "click") {
+                std::string rest;
+                std::getline(input >> std::ws, rest);
+                std::istringstream args(rest);
+                std::string first;
+                if (args >> first) {
+                    // Long press-and-slide: `click <hold> <dir> [distance]`.
+                    if (auto hold = parse_hold(first)) {
+                        std::string dir;
+                        double distance = 0.0;
+                        args >> dir;
+                        args >> distance;
+                        auto lower = [](std::string s) {
+                            for (char &c : s)
+                                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                            return s;
+                        };
+                        const auto d = lower(dir);
+                        double dx = 0.0, dy = 0.0;
+                        if (d == "r" || d == "right")
+                            dx = distance;
+                        else if (d == "l" || d == "left")
+                            dx = -distance;
+                        else if (d == "d" || d == "down")
+                            dy = distance;
+                        else if (d == "t" || d == "top" || d == "up")
+                            dy = -distance;
+                        else if (d == "c" || d == "center")
+                            dx = dy = 0.0;
+                        else {
+                            fmt::println(stderr,
+                                "usage: click <hold> <Top|Down|Left|Right|Center> [distance]  "
+                                "e.g. `click 4s R 300`");
+                            continue;
+                        }
+                        double x = mouse_x, y = mouse_y;
+                        if (x < 0 || y < 0) {
+                            x = frame_width > 0 ? frame_width / 2.0 : 0.0;
+                            y = frame_height > 0 ? frame_height / 2.0 : 0.0;
+                        }
+                        const auto barrier = frame_barrier();
+                        auto result = app.press_drag(x, y, dx, dy, *hold);
+                        if (!result) {
+                            fmt::println(stderr, "[{}] {}", result.error(), result.error().message());
+                        } else {
+                            mouse_x = x + dx;
+                            mouse_y = y + dy;
+                            cursor_is_device = false;
+                            wait_for_new_frame(barrier, 1'000);
+                        }
+                        continue;
+                    }
+                }
+                // Plain `click [x y]`.
+                double x = mouse_x, y = mouse_y;
+                std::istringstream nums(rest);
+                if (!(nums >> x >> y)) {
+                    if (mouse_x < 0 || mouse_y < 0) {
+                        fmt::println(stderr, "no known cursor position yet; run screenshot or move X Y");
+                        continue;
+                    }
+                    x = mouse_x;
+                    y = mouse_y;
+                }
+                if (frame_width > 0) x = std::clamp(x, 0.0, static_cast<double>(frame_width - 1));
+                if (frame_height > 0) y = std::clamp(y, 0.0, static_cast<double>(frame_height - 1));
+                const auto barrier = frame_barrier();
+                auto result = app.click(x, y);
+                if (!result)
+                    fmt::println(stderr, "[{}] {}", result.error(), result.error().message());
+                else {
+                    mouse_x = x;
+                    mouse_y = y;
+                    cursor_is_device = false;
+                    wait_for_new_frame(barrier, 1'000);
+                }
+                continue;
+            }
+
+            // `move [x y]`
             double x = mouse_x;
             double y = mouse_y;
             if (!(input >> x >> y)) {
@@ -499,12 +692,10 @@ int main(int argc, char **argv) {
                 x = mouse_x;
                 y = mouse_y;
             }
-            // Keep the coordinates inside the current window; a resized window
-            // must not be addressed with the startup size.
             if (frame_width > 0) x = std::clamp(x, 0.0, static_cast<double>(frame_width - 1));
             if (frame_height > 0) y = std::clamp(y, 0.0, static_cast<double>(frame_height - 1));
             const auto barrier = frame_barrier();
-            auto result = command == "click" ? app.click(x, y) : app.move_mouse(x, y);
+            auto result = app.move_mouse(x, y);
             if (!result)
                 fmt::println(stderr, "[{}] {}", result.error(), result.error().message());
             else {
@@ -577,12 +768,25 @@ int main(int argc, char **argv) {
             std::getline(input >> std::ws, combination);
             if (combination.empty()) {
                 fmt::println(stderr,
-                    "usage: key <combination>  e.g. `key Enter`, `key Space`, "
-                    "`key ctrl+s`, `key alt+F4`");
+                    "usage: key <combination> [hold]  e.g. `key Enter`, `key Alt-C`, "
+                    "`key ctrl+s`, `key Space 3s`, `key Enter 500ms`");
                 continue;
             }
+            // An optional trailing duration makes it a long press.
+            std::chrono::milliseconds hold{0};
+            if (const auto last = combination.find_last_of(" \t"); last != std::string::npos) {
+                const std::string tail = combination.substr(last + 1);
+                if (const auto parsed_hold = parse_hold(tail); parsed_hold && tail != combination) {
+                    hold = *parsed_hold;
+                    combination = combination.substr(0, last);
+                }
+            }
             const auto barrier = frame_barrier();
-            auto result = app.press_key(combination);
+            if (key_delay > 0.0) {
+                fmt::println("key-delay: waiting {:.1f}s — focus the target window now", key_delay);
+                std::this_thread::sleep_for(std::chrono::duration<double>(key_delay));
+            }
+            auto result = hold.count() > 0 ? app.press_key_hold(combination, hold) : app.press_key(combination);
             if (!result)
                 fmt::println(stderr, "[{}] {}", result.error(), result.error().message());
             else
@@ -591,6 +795,10 @@ int main(int argc, char **argv) {
         }
         if (command == "escape" || command == "esc") {
             const auto barrier = frame_barrier();
+            if (key_delay > 0.0) {
+                fmt::println("key-delay: waiting {:.1f}s — focus the target window now", key_delay);
+                std::this_thread::sleep_for(std::chrono::duration<double>(key_delay));
+            }
             auto result = app.press_key("Escape");
             if (!result)
                 fmt::println(stderr, "[{}] {}", result.error(), result.error().message());
@@ -602,6 +810,10 @@ int main(int argc, char **argv) {
             std::string text;
             std::getline(input >> std::ws, text);
             const auto barrier = frame_barrier();
+            if (key_delay > 0.0) {
+                fmt::println("key-delay: waiting {:.1f}s — focus the target window now", key_delay);
+                std::this_thread::sleep_for(std::chrono::duration<double>(key_delay));
+            }
             auto result = app.type_text(text);
             if (!result)
                 fmt::println(stderr, "[{}] {}", result.error(), result.error().message());
