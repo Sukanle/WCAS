@@ -193,11 +193,20 @@ struct ConnState {
     int client_fd = -1;
     std::atomic<std::uint64_t> commit_count{0};
     std::atomic<bool> connected{false};
+    /// Set on shutdown so `Connection::run()` stops promptly and its thread can
+    /// be joined. Without it the detached connection threads outlive static
+    /// state and crash during process exit.
+    std::atomic<bool> stop{false};
     std::atomic<bool> capturable_surface{false};
     /// Set when the public API was asked for a capture backend this build
     /// cannot serve. Capture must then fail instead of silently falling back
     /// to a different backend.
     std::atomic<bool> backend_unsupported{false};
+    /// When true, forward this connection's `xdg_activation_v1.activate`
+    /// requests to the compositor (so its window can be activated and will then
+    /// accept synthetic keyboard input). Dropped otherwise to avoid stealing
+    /// the user's focus. Set on the session the caller explicitly selected.
+    std::atomic<bool> allow_activation{false};
     /// The selected capture backend, mirroring the public `CaptureBackend`
     /// enum order: 0=client_buffer, 1=kms, 2=shm, 3=dmabuf.
     std::atomic<int> capture_backend{0};
@@ -334,6 +343,9 @@ std::vector<SurfaceDebug> dump_surfaces(const std::shared_ptr<ConnState> &state)
 struct SessionCounters {
     std::size_t surfaces = 0;
     std::size_t toplevels = 0;
+    bool has_keyboard = false;
+    bool has_pointer = false;
+    bool has_keymap = false;
 };
 SessionCounters session_counters(const std::shared_ptr<ConnState> &state);
 

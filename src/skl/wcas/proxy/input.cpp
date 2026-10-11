@@ -111,8 +111,26 @@ std::uint32_t target_surface(const std::shared_ptr<ConnState> &state) {
     return best;
 }
 
-// ---- wl_pointer events ----
+std::uint32_t keyboard_surface(const std::shared_ptr<ConnState> &state, std::uint32_t preferred) {
+    if (!state) return preferred;
+    std::lock_guard lock(state->data_mutex);
+    std::uint32_t sid = preferred;
+    for (int depth = 0; depth < 16 && sid; ++depth) {
+        if (state->surface_to_toplevel.find(sid) != state->surface_to_toplevel.end()) return sid;
+        const auto parent = state->surface_to_parent_surface.find(sid);
+        if (parent == state->surface_to_parent_surface.end()) break;
+        sid = parent->second;
+    }
+    // No ancestor owns a toplevel (or `preferred` was 0): fall back to any
+    // surface that does.
+    for (const auto &[toplevel_surface, toplevel] : state->surface_to_toplevel) {
+        (void)toplevel;
+        if (toplevel_surface) return toplevel_surface;
+    }
+    return preferred;
+}
 
+// ---- wl_pointer events ----
 bool inject_pointer_leave(const std::shared_ptr<ConnState> &state, std::uint32_t surface_id) {
     if (!state || !state->pointer_obj) return false;
     std::lock_guard lock(state->data_mutex);
@@ -221,6 +239,16 @@ bool ensure_keyboard_focus(const std::shared_ptr<ConnState> &state, std::uint32_
     enter[3] = surface_id;
     enter[4] = 0;
     if (!send_message(state->client_fd, enter)) return false;
+    // A real compositor always follows `enter` with a `modifiers` event; some
+    // toolkits (notably Wine/Unity) ignore key events until they receive one.
+    std::vector<std::uint32_t> modifiers(7);
+    wl_header(modifiers, state->keyboard_obj, 4);   // opcode 4 = modifiers
+    modifiers[2] = next_serial(state);
+    modifiers[3] = 0;   // depressed
+    modifiers[4] = 0;   // latched
+    modifiers[5] = 0;   // locked
+    modifiers[6] = 0;   // group
+    if (!send_message(state->client_fd, modifiers)) return false;
     state->keyboard_focus = surface_id;
     return true;
 }
@@ -258,7 +286,7 @@ KeyCombination parse_key_combination(const std::string &combination) {
     std::vector<std::string> tokens;
     std::string current;
     for (const char c : combination) {
-        if (c == '+') {
+        if (c == '+' || c == '-') {
             tokens.push_back(current);
             current.clear();
         } else {
@@ -302,13 +330,14 @@ bool inject_text(const std::shared_ptr<ConnState> &state, const std::string &tex
 
     const auto surface = target_surface(state);
     if (!surface || !state->keyboard_obj) return false;
+    const auto focus_surface = keyboard_surface(state, surface);
 
     const auto keymap_text = read_keymap_text(*state);
     if (!keymap_text) return false;
     const auto keymap = Keymap::parse(*keymap_text);
     if (!keymap.valid()) return false;
 
-    if (!ensure_keyboard_focus(state, surface)) return false;
+    if (!ensure_keyboard_focus(state, focus_surface)) return false;
 
     // Split into runs of plain characters and special keys so the keymap is
     // searched once per run instead of once per character.

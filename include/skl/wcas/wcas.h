@@ -88,6 +88,11 @@ struct WCAS_API SessionInfo {
     /// surfaces==0 means no window was ever created on this connection.
     int surfaces = 0;
     int toplevels = 0;
+    /// Whether the connection bound wl_keyboard / wl_pointer and received a
+    /// keymap. Keyboard injection cannot work without all three.
+    bool has_keyboard = false;
+    bool has_pointer = false;
+    bool has_keymap = false;
     /// Command line + executable of the owning process (diagnostic: tells the
     /// game connection apart from helper/CEF ones).
     std::string command;
@@ -210,6 +215,11 @@ public:
     [[nodiscard]] std::vector<SurfaceInfo> surfaces() const;
     /// Route capture and input to the window at `index` (from `windows()`).
     [[nodiscard]] result<void> select_window(int index);
+    /// When enabled, the selected window's `xdg_activation_v1.activate` requests
+    /// are forwarded so the compositor activates it. Required for Wine/Unity
+    /// windows to accept synthetic keyboard input, but the activation takes the
+    /// user's keyboard focus. Off by default.
+    void set_allow_activation(bool value) noexcept;
     [[nodiscard]] result<void> move_mouse(double x, double y) const;
     [[nodiscard]] result<void> click(
         double x, double y, PointerButton button = PointerButton::left, unsigned count = 1) const;
@@ -217,8 +227,15 @@ public:
         double x, double y, PointerButton button, unsigned count, std::string modifiers) const;
     [[nodiscard]] result<void> scroll(double x, double y, int dx, int dy) const;
     [[nodiscard]] result<void> press_key(std::string combination) const;
+    /// Like `press_key`, but keeps the key (and modifiers) held for `hold`
+    /// before releasing, for long-press actions (e.g. `key Enter 3s`).
+    [[nodiscard]] result<void> press_key_hold(std::string combination, std::chrono::milliseconds hold) const;
     [[nodiscard]] result<void> type_text(std::string text) const;
     [[nodiscard]] result<void> drag(double from_x, double from_y, double to_x, double to_y) const;
+    /// Press at (from_x, from_y), slide by (dx, dy) frame pixels over `hold`,
+    /// then release. Models a long press-and-drag (e.g. `click 4s R 300`).
+    [[nodiscard]] result<void> press_drag(
+        double from_x, double from_y, double dx, double dy, std::chrono::milliseconds hold) const;
     void stop() noexcept;
 
 private:
@@ -229,6 +246,9 @@ private:
     /// still valid, otherwise the best in the launch tree). Persists the
     /// fallback so status/list agree. False when nothing usable exists.
     [[nodiscard]] bool ensure_active_session() const;
+    /// Apply `impl_->allow_activation` to the session tree: only the selected
+    /// session may forward activation.
+    void apply_activation_selection() const;
     std::unique_ptr<Impl> impl_;
 };
 [[nodiscard]] WCAS_API bool frame_has_visible_content(const CapturedFrame &frame) noexcept;

@@ -14,6 +14,14 @@ namespace skl::wcas::proxy {
 /// reference `target_surface`. Returns 0 when the app has no surface yet.
 std::uint32_t target_surface(const std::shared_ptr<ConnState> &state);
 
+/// Surface to send `wl_keyboard.enter` for. Wine maps keyboard focus to a window
+/// through the surface that carries the `xdg_toplevel` role, so focusing the
+/// rendering subsurface (what `target_surface` returns) can make the app drop
+/// key events. Walks up the subsurface parent chain from `preferred` to the
+/// surface that owns a toplevel, falling back to any toplevel surface and then
+/// to `preferred`.
+std::uint32_t keyboard_surface(const std::shared_ptr<ConnState> &state, std::uint32_t preferred);
+
 /// Send wl_pointer.leave event to the app.
 bool inject_pointer_leave(const std::shared_ptr<ConnState> &state, std::uint32_t surface_id);
 
