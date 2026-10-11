@@ -641,6 +641,8 @@ build_test_command() {
     # 输出目录
     cmd+=("--output-dir" "${OUTPUT_DIR}")
 
+    # cmd+=("--key-delay" "3")
+
     # 继承输出
     if ${INHERIT_OUTPUT}; then
         cmd+=("--inherit-output")
