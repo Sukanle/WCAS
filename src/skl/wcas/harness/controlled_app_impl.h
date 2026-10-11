@@ -26,6 +26,11 @@ struct ControlledApp::Impl {
     /// Requested capture backend, re-applied when the target window changes so
     /// a newly selected session captures through the same backend.
     CaptureBackend backend = CaptureBackend::client_buffer;
+    /// When true, the app's `xdg_activation_v1.activate` requests are forwarded
+    /// for the *selected* session so the compositor activates that window.
+    /// Wine/Unity ignore synthetic keys unless their toplevel is activated.
+    /// Off by default because activation steals the user's keyboard focus.
+    bool allow_activation = false;
 };
 
 }   // namespace skl::wcas

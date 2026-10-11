@@ -357,6 +357,10 @@ int main() {
     assert((get(enter_event, 4) & 0xffffu) == 1);   // wl_keyboard.enter
     assert(get(enter_event, 12) == upstream_surface);
     assert(get(enter_event, 16) == 0);   // empty keys array
+    // `enter` is followed by a `modifiers` event, as a real compositor sends.
+    auto modifiers_event = receive(compositor_fd);
+    assert(get(modifiers_event, 0) == upstream_keyboard);
+    assert((get(modifiers_event, 4) & 0xffffu) == 4);   // wl_keyboard.modifiers
     // Re-focusing the same surface emits nothing at all.
     assert(skl::wcas::proxy::ensure_keyboard_focus(state, surface_id));
     assert(state->keyboard_focus == surface_id);

@@ -30,6 +30,9 @@ struct SessionStatus {
     std::size_t windows = 0;
     std::size_t surfaces = 0;
     std::size_t toplevels = 0;
+    bool has_keyboard = false;
+    bool has_pointer = false;
+    bool has_keymap = false;
     /// Command line + executable of the owning process, so callers can tell
     /// which connection a session belongs to (the game vs a helper/CEF).
     std::string command;

@@ -22,6 +22,7 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -74,6 +75,11 @@ struct ComputerUse::Impl {
     int bridge_width = 1'280, bridge_height = 800;
     std::atomic<bool> stopping{false};
     std::thread accept_thread;
+    /// Per-connection proxy threads. They are joined on shutdown; leaving them
+    /// detached let them run during process exit and crash on static state.
+    std::mutex connection_mutex;
+    std::vector<std::thread> connection_threads;
+    std::vector<std::shared_ptr<proxy::ConnState>> connection_states;
     bool closed = false;
     ~Impl() {
         stopping = true;
@@ -82,6 +88,16 @@ struct ComputerUse::Impl {
             ::close(socket_fd);
         }
         if (accept_thread.joinable()) accept_thread.join();
+        std::vector<std::thread> threads;
+        {
+            std::lock_guard lock(connection_mutex);
+            for (const auto &state : connection_states)
+                state->stop = true;
+            threads.swap(connection_threads);
+        }
+        for (auto &thread : threads) {
+            if (thread.joinable()) thread.join();
+        }
         if (!socket_path.empty()) ::unlink(socket_path.c_str());
     }
 };
@@ -222,10 +238,14 @@ result<ComputerUse> ComputerUse::create() {
             session->owner_pid = credentials.pid;
             session->client_fd = client;
             detail::register_session(credentials.pid, session);
-            std::thread([client, upstream, session] {
-                proxy::Connection(client, upstream, session).run();
-                detail::erase_session(session);
-            }).detach();
+            {
+                std::lock_guard lock(state->connection_mutex);
+                state->connection_states.push_back(session);
+                state->connection_threads.emplace_back([client, upstream, session] {
+                    proxy::Connection(client, upstream, session).run();
+                    detail::erase_session(session);
+                });
+            }
         }
     });
     return ComputerUse(std::move(impl));

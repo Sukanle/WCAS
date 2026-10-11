@@ -197,6 +197,9 @@ std::vector<SessionStatus> session_status(pid_t root, const std::string &match_r
         const auto counters = proxy::session_counters(state);
         status.surfaces = counters.surfaces;
         status.toplevels = counters.toplevels;
+        status.has_keyboard = counters.has_keyboard;
+        status.has_pointer = counters.has_pointer;
+        status.has_keymap = counters.has_keymap;
         if (state->owner_pid > 0) status.command = process_text(static_cast<pid_t>(state->owner_pid));
         out.push_back(status);
         ++it;

@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <tuple>
 #include <cstring>
 #include <memory>
@@ -407,11 +408,17 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
     // `xdg_activation_v1.activate` (opcode 2) lets the app ask the compositor to
     // focus its window. A synthetic click injected by wcas reaches the app,
     // which (via Wine's Wayland driver) may then request activation, stealing
-    // focus from the terminal during automation. Drop it: the app is already
-    // running and no compositor-side activation is wanted.
+    // focus from the terminal during automation. By default it is dropped. It
+    // is forwarded only for a session the caller explicitly selected (so the
+    // window can be activated and then accept synthetic keyboard input).
     if (app_to_upstream && role == "xdg_activation_v1" && opcode == 2) {
-        *drop = true;
-        return true;
+        const bool allow = state.allow_activation.load();
+        if (std::getenv("WCAS_DEBUG"))
+            std::fprintf(stderr, "DEBUG activation: xdg_activation.activate forwarded=%d\n", allow ? 1 : 0);
+        if (!allow) {
+            *drop = true;
+            return true;
+        }
     }
 
     if (!app_to_upstream && opcode == 0 && role == "wl_registry") {
@@ -1341,6 +1348,9 @@ SessionCounters session_counters(const std::shared_ptr<ConnState> &state) {
     std::lock_guard lock(state->data_mutex);
     counters.surfaces = state->surfaces.size();
     counters.toplevels = state->toplevels.size();
+    counters.has_keyboard = state->keyboard_obj != 0;
+    counters.has_pointer = state->pointer_obj != 0;
+    counters.has_keymap = state->keymap_fd >= 0;
     return counters;
 }
 
@@ -1481,6 +1491,7 @@ void Connection::run() {
     }
 
     while (true) {
+        if (state_->stop.load()) break;
         std::vector<ReactorEvent> events;
         if (reactor.wait(events, 200) < 0) break;
 

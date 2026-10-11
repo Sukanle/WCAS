@@ -19,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -44,6 +45,18 @@ double to_logical(const std::shared_ptr<proxy::ConnState> &session, std::uint32_
 }
 
 }   // namespace
+void ControlledApp::apply_activation_selection() const {
+    if (!impl_ || impl_->child <= 0) return;
+    for (const auto &session : detail::sessions_for(impl_->child, impl_->match_regex))
+        session->allow_activation = impl_->allow_activation && session == impl_->session;
+}
+
+void ControlledApp::set_allow_activation(bool value) noexcept {
+    if (!impl_) return;
+    impl_->allow_activation = value;
+    apply_activation_selection();
+}
+
 bool ControlledApp::ensure_active_session() const {
     if (!impl_) return false;
     // An explicitly selected session wins as long as it is still connected:
@@ -56,12 +69,14 @@ bool ControlledApp::ensure_active_session() const {
         for (const auto &session : detail::sessions_for(impl_->child, impl_->match_regex)) {
             if (session->capturable_surface.load()) {
                 impl_->session = session;
+                apply_activation_selection();
                 return true;
             }
         }
         if (impl_->session && impl_->session->connected.load()) return true;
         if (auto session = detail::session_for(impl_->child)) {
             impl_->session = session;
+            apply_activation_selection();
             return true;
         }
     }
@@ -198,7 +213,7 @@ std::vector<SessionInfo> ControlledApp::sessions() const {
     for (const auto &status : detail::session_status(impl_->child, impl_->match_regex)) {
         out.push_back(SessionInfo{static_cast<int>(status.owner_pid), status.connected, status.matched,
             static_cast<int>(status.windows), static_cast<int>(status.surfaces), static_cast<int>(status.toplevels),
-            status.command});
+            status.has_keyboard, status.has_pointer, status.has_keymap, status.command});
     }
     return out;
 }
@@ -270,6 +285,10 @@ result<void> ControlledApp::select_window(int index) {
                 std::lock_guard lock(session->data_mutex);
                 session->preferred_surface = surface;
             }
+            // Activation is allowed only on the explicitly selected session, so
+            // it can be focused and accept keyboard input without other windows
+            // stealing focus.
+            apply_activation_selection();
             // Re-apply the requested backend to the newly selected session so
             // it does not silently fall back to the default.
             const bool supported = impl_->backend == CaptureBackend::shm
@@ -398,14 +417,22 @@ result<void> ControlledApp::scroll(double x, double y, int dx, int dy) const {
 }
 
 result<void> ControlledApp::press_key(std::string combination) const {
+    return press_key_hold(std::move(combination), std::chrono::milliseconds{0});
+}
+
+result<void> ControlledApp::press_key_hold(std::string combination, std::chrono::milliseconds hold) const {
     if (!impl_ || !ensure_active_session()) return code(errc::input_injection_failed);
     auto s = impl_->session;
     if (!s->keyboard_obj) return code(errc::input_injection_failed);
     const auto surface = input_target(s);
     if (!surface) return code(errc::input_injection_failed);
+    // Wine maps keyboard focus to the window via the surface that carries the
+    // xdg_toplevel, so enter that one rather than the rendering subsurface.
+    const auto focus_surface = proxy::keyboard_surface(s, surface);
     if (std::getenv("WCAS_DEBUG")) {
-        std::fprintf(stderr, "DEBUG input: press_key '%s' session_pid=%ld keyboard_obj=%u target_surface=%u\n",
-            combination.c_str(), static_cast<long>(s->owner_pid), s->keyboard_obj, surface);
+        std::fprintf(stderr,
+            "DEBUG input: press_key '%s' session_pid=%ld keyboard_obj=%u target_surface=%u focus_surface=%u\n",
+            combination.c_str(), static_cast<long>(s->owner_pid), s->keyboard_obj, surface, focus_surface);
     }
 
     const auto parsed = proxy::parse_key_combination(combination);
@@ -415,7 +442,7 @@ result<void> ControlledApp::press_key(std::string combination) const {
     const auto keymap = proxy::Keymap::parse(*keymap_text);
     if (!keymap.valid()) return code(errc::input_injection_failed);
 
-    if (!proxy::ensure_keyboard_focus(s, surface)) return code(errc::input_injection_failed);
+    if (!proxy::ensure_keyboard_focus(s, focus_surface)) return code(errc::input_injection_failed);
 
     // Resolve every modifier and the key itself against the app's own layout;
     // there is no hard-coded keycode table to fall back to.
@@ -441,6 +468,7 @@ result<void> ControlledApp::press_key(std::string combination) const {
     if (!keycode) return code(errc::input_injection_failed);
 
     bool ok = proxy::inject_key_raw(s, *keycode, true);
+    if (ok && hold.count() > 0) std::this_thread::sleep_for(hold);
     if (ok) ok = proxy::inject_key_raw(s, *keycode, false);
     for (auto it = held.rbegin(); it != held.rend(); ++it) {
         if (!proxy::inject_key_raw(s, *it, false)) ok = false;
@@ -488,6 +516,43 @@ result<void> ControlledApp::drag(double from_x, double from_y, double to_x, doub
     if (!proxy::inject_pointer_button(s, 0x110, false)) return code(errc::input_injection_failed);
     if (!proxy::inject_pointer_frame(s)) return code(errc::input_injection_failed);
 
+    return boost::outcome_v2::success();
+}
+result<void> ControlledApp::press_drag(
+    double from_x, double from_y, double dx, double dy, std::chrono::milliseconds hold) const {
+    if (!impl_ || !ensure_active_session()) return code(errc::input_injection_failed);
+    auto s = impl_->session;
+
+    const auto target = input_target(s);
+    if (!target) return code(errc::input_injection_failed);
+    const double from_lx = to_logical(s, target, from_x);
+    const double from_ly = to_logical(s, target, from_y);
+    // dx/dy are frame pixels like the CLI coordinates; convert to logical.
+    const double ddx = to_logical(s, target, dx);
+    const double ddy = to_logical(s, target, dy);
+    if (!proxy::ensure_pointer_focus(s, target, from_lx, from_ly)) return code(errc::input_injection_failed);
+
+    if (!proxy::inject_pointer_motion(s, from_lx, from_ly)) return code(errc::input_injection_failed);
+    if (!proxy::inject_pointer_frame(s)) return code(errc::input_injection_failed);
+    if (!proxy::inject_pointer_button(s, 0x110, true)) return code(errc::input_injection_failed);
+    if (!proxy::inject_pointer_frame(s)) return code(errc::input_injection_failed);
+
+    // Slide across the hold duration so the app sees a held button that moves.
+    const auto total = hold.count();
+    const int steps = total > 0 ? std::max(1, static_cast<int>(total / 50)) : 1;
+    const auto step_delay = std::chrono::milliseconds(total > 0 ? total / steps : 0);
+    for (int i = 1; i <= steps; ++i) {
+        const double f = static_cast<double>(i) / steps;
+        if (ddx != 0.0 || ddy != 0.0) {
+            if (!proxy::inject_pointer_motion(s, from_lx + ddx * f, from_ly + ddy * f))
+                return code(errc::input_injection_failed);
+            if (!proxy::inject_pointer_frame(s)) return code(errc::input_injection_failed);
+        }
+        if (step_delay.count() > 0) std::this_thread::sleep_for(step_delay);
+    }
+
+    if (!proxy::inject_pointer_button(s, 0x110, false)) return code(errc::input_injection_failed);
+    if (!proxy::inject_pointer_frame(s)) return code(errc::input_injection_failed);
     return boost::outcome_v2::success();
 }
 void ControlledApp::stop() noexcept {
