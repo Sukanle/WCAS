@@ -52,7 +52,8 @@ std::optional<CaptureBackend> parse_backend(const std::string &value) {
 void print_help() {
     fmt::print(
         "commands: screenshot|ss [now], up|w, down|s, left|a, right|d, center|c,\n"
-        "          move <x> <y>, click [<x> <y>] | click <hold> <Top|Down|Left|Right|Center> [px], cursor|pxy,\n"
+        "          move <x> <y>, click [<x> <y>] | click <hold> <Top|Down|Left|Right|Center> [px],\n"
+        "          drag <dx> <dy> (move the view/cursor without clicking), cursor|pxy,\n"
         "          key|press <combo> (e.g. Enter, Space, ctrl+s, alt+F4), escape|esc, type <text>,\n"
         "                    list|ls, sessions, surfaces, target <index|app_id|title>,\n"
         "                    activation on|off (allow the selected window to be activated for keyboard),\n"
@@ -63,7 +64,7 @@ void print_help() {
 
 }   // namespace
 
-/// Parse a trailing hold duration such as `3s`, `500ms`, `2m`, `1.5s`.
+/// Parse a trailing hold duration such as `3s`, `500ms`, `1.5s`.
 std::optional<std::chrono::milliseconds> parse_hold(const std::string &token) {
     std::string number;
     std::string unit;
@@ -80,10 +81,10 @@ std::optional<std::chrono::milliseconds> parse_hold(const std::string &token) {
     } catch (...) {
         return std::nullopt;
     }
+
     if (unit == "ms") return std::chrono::milliseconds(static_cast<long long>(value));
-    if (unit == "s") return std::chrono::milliseconds(static_cast<long long>(value * 1000.0));
-    if (unit == "m") return std::chrono::milliseconds(static_cast<long long>(value * 60'000.0));
-    return std::nullopt;
+
+    return std::chrono::milliseconds(static_cast<long long>(value * 1000.0));
 }
 
 /// Move the window whose app_id is `cls` to monitor `monitor` using Hyprland's
@@ -107,7 +108,7 @@ int main(int argc, char **argv) {
     bool gpu_accelerated = false;
     std::vector<std::string> args;
     std::vector<std::pair<std::string, std::string>> environment;
-    auto graphics_api = GraphicsApi::vulkan;
+    auto graphics_api = GraphicsApi::dxvk;
     auto capture_backend = CaptureBackend::client_buffer;
     int native_timeout = 8;
     int fallback_timeout = 30;
@@ -140,7 +141,7 @@ int main(int argc, char **argv) {
         ("output-dir,o", po::value<std::string>(&output_dir)->default_value(output_dir), "output directory")
         ("bridge-width,x", po::value<int>(&bridge_width)->default_value(bridge_width), "bridge width")
         ("bridge-height,y", po::value<int>(&bridge_height)->default_value(bridge_height), "bridge height")
-        ("graphics-api,g", po::value<std::string>(), "vulkan (vk/dxvk) or opengl (gl/wined3d)")
+        ("graphics-api,g", po::value<std::string>(), "dxvk (default), vulkan (vk, native), opengl (gl/wined3d)")
         ("capture-backend,b", po::value<std::string>(), "client (default), kms, shm, dmabuf")
         ("match-regex,r", po::value<std::string>(&match_regex), "extra regex for child-window processes (default: program dir)")
         ("debug-all", po::bool_switch(&debug.all), "enable all debug categories")
@@ -178,12 +179,15 @@ int main(int argc, char **argv) {
 
     if (vm.count("graphics-api")) {
         const auto value = vm["graphics-api"].as<std::string>();
-        if (value == "vulkan" || value == "vk" || value == "dxvk")
+        if (value == "dxvk")
+            graphics_api = GraphicsApi::dxvk;
+        else if (value == "vulkan" || value == "vk")
             graphics_api = GraphicsApi::vulkan;
         else if (value == "opengl" || value == "gl" || value == "wined3d")
             graphics_api = GraphicsApi::opengl;
         else {
-            fmt::println(stderr, "error: 未知图形 API: {}，可选值: vulkan (vk/dxvk), opengl (gl/wined3d)", value);
+            fmt::println(
+                stderr, "error: 未知图形 API: {}，可选值: dxvk, vulkan (vk, 原生), opengl (gl/wined3d)", value);
             return 2;
         }
     }
@@ -595,6 +599,37 @@ int main(int argc, char **argv) {
                     mouse_x = frame_width / 2.0;
                     mouse_y = frame_height / 2.0;
                 }
+            }
+            continue;
+        }
+        if (command == "drag") {
+            // `drag <dx> <dy>`: move the view/cursor by a 2D delta **without**
+            // pressing any button, so a pointer-locked camera follows the motion
+            // and the game never sees a click.
+            refresh_frame_size();
+            sync_cursor_from_device();
+            std::string rest;
+            std::getline(input >> std::ws, rest);
+            std::istringstream args(rest);
+            double dx = 0.0, dy = 0.0;
+            if (!(args >> dx >> dy)) {
+                fmt::println(stderr, "usage: drag <dx> <dy>  e.g. `drag 300 -120`");
+                continue;
+            }
+            double x = mouse_x, y = mouse_y;
+            if (x < 0 || y < 0) {
+                x = frame_width > 0 ? frame_width / 2.0 : 0.0;
+                y = frame_height > 0 ? frame_height / 2.0 : 0.0;
+            }
+            const auto barrier = frame_barrier();
+            auto result = app.relative_drag(x, y, dx, dy);
+            if (!result)
+                fmt::println(stderr, "[{}] {}", result.error(), result.error().message());
+            else {
+                mouse_x = x + dx;
+                mouse_y = y + dy;
+                cursor_is_device = false;
+                wait_for_new_frame(barrier, 1'000);
             }
             continue;
         }

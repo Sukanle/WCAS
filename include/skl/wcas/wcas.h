@@ -21,7 +21,12 @@ enum class Transport {
     xwayland
 };
 enum class GraphicsApi {
+    /// Proton/umu default: DXVK translates the game's DirectX calls to Vulkan.
+    dxvk,
+    /// The game's own native Vulkan renderer: DXVK is disabled so the game
+    /// reaches Vulkan directly. Only meaningful for games that ship one.
     vulkan,
+    /// WineD3D (OpenGL), selected via PROTON_USE_WINED3D.
     opengl
 };
 enum class CaptureBackend {
@@ -236,6 +241,10 @@ public:
     /// then release. Models a long press-and-drag (e.g. `click 4s R 300`).
     [[nodiscard]] result<void> press_drag(
         double from_x, double from_y, double dx, double dy, std::chrono::milliseconds hold) const;
+    /// Move by (dx, dy) frame pixels **without** pressing a mouse button.
+    /// Drives pointer-locked 3D cameras (relative motion) and moves the cursor
+    /// (absolute motion) but never registers as a click.
+    [[nodiscard]] result<void> relative_drag(double from_x, double from_y, double dx, double dy) const;
     void stop() noexcept;
 
 private:

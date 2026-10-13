@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -14,6 +15,11 @@ struct VulkanFrame {
     std::vector<std::uint8_t> pixels;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
+    /// Whether the device advertised the source modifier as supported for
+    /// `TRANSFER_SRC`. The import can succeed even when this is false (the
+    /// driver accepts layouts it does not list), in which case the pixels are
+    /// decoded on an unsupported layout and must not be trusted.
+    bool modifier_supported = false;
 };
 
 /// True when a Vulkan device exposing the DMA-BUF import extensions is
@@ -32,6 +38,11 @@ std::optional<VulkanFrame> vulkan_import_dmabuf(int fd, std::uint32_t width, std
 /// driver does not support `DMA_BUF_IOCTL_EXPORT_SYNC_FILE`. When the returned
 /// fd is >= 0, `*active` reports whether a real fence must be waited on.
 int export_dmabuf_sync_file(int dmabuf_fd, bool *active);
+
+/// Diagnostic trace for the capture path. Each distinct message is emitted at
+/// most a few times per process, so a capture loop does not drown the log while
+/// still showing which buffer layout was seen.
+void trace_capture(std::string message);
 
 /// Capture a single-plane DMA-BUF into a BGR `cv::Mat`. Tries the Vulkan
 /// import path first (tiled/non-mappable buffers) and falls back to a linear

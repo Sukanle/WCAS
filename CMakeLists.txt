@@ -26,6 +26,12 @@ pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
 pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb xcb-composite)
 pkg_check_modules(VULKAN REQUIRED IMPORTED_TARGET vulkan)
 pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing)
+# Optional EGL/GBM backend: the only path that decodes NVIDIA framebuffer-
+# compressed DMA-BUFs (the compositor uses the same stack). Absent => the
+# backend compiles to a stub and capture stays on Vulkan.
+pkg_check_modules(EGL IMPORTED_TARGET egl)
+pkg_check_modules(GLESV2 IMPORTED_TARGET glesv2)
+pkg_check_modules(GBM IMPORTED_TARGET gbm)
 
 find_program(MESON_EXECUTABLE meson REQUIRED)
 find_program(NINJA_EXECUTABLE ninja REQUIRED)
@@ -187,6 +193,7 @@ add_library(
     src/skl/wcas/proxy/capture_slot.cpp
     src/skl/wcas/proxy/capture_scheduler.cpp
     src/skl/wcas/proxy/vulkan_dmabuf.cpp
+    src/skl/wcas/proxy/egl_dmabuf.cpp
     ${WCAS_WIRE_META_SOURCES}
     src/skl/wcas/harness/session.cpp
     src/skl/wcas/harness/computer_use.cpp
@@ -210,6 +217,10 @@ target_link_libraries(
             PkgConfig::LIBURING)
 target_link_libraries(wcas PRIVATE libdrmtap::drmtap)
 target_compile_definitions(wcas PRIVATE WCAS_HAVE_DRMTAP=1)
+if(EGL_FOUND AND GLESV2_FOUND AND GBM_FOUND)
+    target_compile_definitions(wcas PRIVATE WCAS_HAVE_EGL=1)
+    target_link_libraries(wcas PRIVATE PkgConfig::EGL PkgConfig::GLESV2 PkgConfig::GBM)
+endif()
 set_property(
     TARGET wcas
     APPEND
@@ -282,7 +293,6 @@ if(BUILD_TESTING)
     target_include_directories(wcas-xwayland-fallback PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
     target_compile_options(wcas-xwayland-fallback PRIVATE -UNDEBUG)
     add_test(NAME wcas-xwayland-fallback COMMAND wcas-xwayland-fallback)
-    pkg_check_modules(GBM IMPORTED_TARGET gbm)
     if(GBM_FOUND)
         target_compile_definitions(wcas-dmabuf-capture PRIVATE WCAS_HAVE_GBM=1)
         target_link_libraries(wcas-dmabuf-capture PRIVATE PkgConfig::GBM)

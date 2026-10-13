@@ -42,7 +42,7 @@
 #   --bridge-width W       XWayland 桥宽度（默认 1280）
 #   --bridge-height H      XWayland 桥高度（默认 800）
 #   --no-gpu               禁用 GPU 加速
-#   --graphics-api API     图形 API 后端: vulkan (默认) 或 opengl
+#   --graphics-api API     图形 API 后端: dxvk (默认) | vulkan (原生) | opengl
 #   --capture-backend BE   截图后端: dmabuf (默认), client, kms, shm
 #   --output-dir DIR       日志输出目录（默认 /tmp/agent-seat-logs）
 #   --inherit-output       继承游戏 stdout/stderr（调试用）
@@ -58,7 +58,7 @@
 #   BRIDGE_WIDTH          XWayland 桥宽度
 #   BRIDGE_HEIGHT         XWayland 桥高度
 #   GPU_ACCELERATED       设为 "0" 强制软件渲染
-#   GRAPHICS_API          图形 API 后端: vulkan (默认) 或 opengl
+#   GRAPHICS_API          图形 API 后端: dxvk (默认) | vulkan (原生) | opengl
 #   CAPTURE_BACKEND       截图后端: dmabuf (默认), client, kms, shm
 #   LOG_DIR               日志输出目录
 # ============================================================================
@@ -105,7 +105,7 @@ CONTENT_TIMEOUT="${CONTENT_TIMEOUT:-120}"
 BRIDGE_WIDTH="${BRIDGE_WIDTH:-1280}"
 BRIDGE_HEIGHT="${BRIDGE_HEIGHT:-720}"
 GPU_ACCELERATED="${GPU_ACCELERATED:-1}"
-GRAPHICS_API="${GRAPHICS_API:-vulkan}"
+GRAPHICS_API="${GRAPHICS_API:-dxvk}"
 CAPTURE_BACKEND="${CAPTURE_BACKEND:-dmabuf}"
 OUTPUT_DIR="${LOG_DIR}"
 INHERIT_OUTPUT=false
@@ -205,10 +205,11 @@ while [[ $# -gt 0 ]]; do
         --graphics-api)
             if [[ -n "${2:-}" ]]; then
                 case "${2}" in
-                    vulkan|vk|dxvk) GRAPHICS_API="vulkan" ;;
+                    dxvk) GRAPHICS_API="dxvk" ;;
+                    vulkan|vk) GRAPHICS_API="vulkan" ;;
                     opengl|gl|wined3d) GRAPHICS_API="opengl" ;;
                     *)
-                        log "[ERROR] 未知图形 API: ${2}，可选值: vulkan (vk/dxvk), opengl (gl/wined3d)"
+                        log "[ERROR] 未知图形 API: ${2}，可选值: dxvk, vulkan (vk, 原生), opengl (gl/wined3d)"
                         exit 1
                         ;;
                 esac
@@ -665,7 +666,7 @@ fi
 log "超时: NativeWayland=${NATIVE_TIMEOUT}s, XWayland=${FALLBACK_TIMEOUT}s, 内容=${CONTENT_TIMEOUT}s"
 log "桥尺寸: ${BRIDGE_WIDTH}x${BRIDGE_HEIGHT}"
 log "GPU 加速: $(if [[ "${GPU_ACCELERATED}" != "0" ]]; then echo 启用; else echo 禁用; fi)"
-log "图形 API: ${GRAPHICS_API} $(case "${GRAPHICS_API}" in vulkan) echo '(DXVK/VKD3D)';; opengl) echo '(WineD3D)';; esac)"
+log "图形 API: ${GRAPHICS_API} $(case "${GRAPHICS_API}" in dxvk) echo '(DXVK/VKD3D)';; vulkan) echo '(游戏原生 Vulkan)';; opengl) echo '(WineD3D)';; esac)"
 log "截图后端: ${CAPTURE_BACKEND} $(case "${CAPTURE_BACKEND}" in client) echo '(客户端缓冲区缓存)';; kms) echo '(DRM/KMS 内核帧缓冲区)';; shm) echo '(wl_shm 共享内存)';; dmabuf) echo '(DMA-BUF GPU 缓冲区)';; esac)"
 # if ${DEBUG_MODE}; then log "调试模式: 启用 (${DEBUG_MODE})"; fi
 if [[ "${DEBUG_MODE}" == "all" ]]; then

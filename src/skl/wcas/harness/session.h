@@ -13,7 +13,14 @@ namespace skl::wcas::detail {
 /// preferring a connection that already has a capturable surface. A launched
 /// umu/Wine app opens several Wayland connections (launcher CEF, helpers, the
 /// game), so the capturable one is the useful match.
-std::shared_ptr<proxy::ConnState> session_for(pid_t pid);
+///
+/// When `match_regex` is non-empty, a session also matches if the owner's
+/// command line / executable path matches it. That fallback is not optional
+/// for umu/Proton: the connecting process is `wineserver`, which detaches, so
+/// once an intermediate launcher exits the owner is re-parented to init and the
+/// ancestor chain no longer reaches `pid` — the pid-only test silently failed
+/// and timed out the native launch even though the session was right there.
+std::shared_ptr<proxy::ConnState> session_for(pid_t pid, const std::string &match_regex = {});
 
 /// All sessions belonging to `pid` or its descendants. When `match_regex` is
 /// non-empty, also include sessions whose owner's command line / executable

@@ -33,11 +33,11 @@ Use lowercase English types, compatible with Conventional Commits.
 
 | Type | Meaning | Example |
 |------|---------|---------|
-| `feat` | New feature | `feat: ScriptCardPainter dynamic layout engine` |
+| `feat` | New feature | `feat: ScriptCardPainter 动态布局引擎` |
 | `refactor` | Code refactoring (no bug fix, no feature) | `refactor: ElaMultiComboBox Fluent UI` |
-| `fix` | Bug fix | `fix(ElaAppBar): fix WM_GETMINMAXINFO DPI multi-screen scaling error` |
-| `docs` | Documentation changes | `docs: project docs + Memory Bank + Agent Skills` |
-| `chore` | Miscellaneous (build, tooling, deps) | `chore(ElaWidgetTools): remove redundant Q_SIGNAL and virtual modifiers` |
+| `fix` | Bug fix | `fix(ElaAppBar): 修复 WM_GETMINMAXINFO 多屏 DPI 缩放错误` |
+| `docs` | Documentation changes | `docs: 项目文档 + Memory Bank + Agent Skills` |
+| `chore` | Miscellaneous (build, tooling, deps) | `chore(ElaWidgetTools): 移除冗余的 Q_SIGNAL 与 virtual 修饰符` |
 | `revert` | Revert a previous commit | Generated automatically by `git revert` |
 
 ## Scope (optional)
@@ -48,38 +48,39 @@ Use lowercase English types, compatible with Conventional Commits.
 
 ## Language and Separator
 
-- Both the subject line and body must use **English**.
+- Both the subject line and body must use **Simplified Chinese** (简体中文). The `type` and `scope` tokens stay in lowercase English.
 - Separate the short description from the detailed body with an **em dash (—)** surrounded by a single space on each side.
-- Historical commits may use Simplified Chinese; do not rewrite them only to change the language.
+- Historical English commits may remain; do not rewrite them only to change the language.
 
 ## Style Rules
 
 - ❌ Do not use emojis (✨ ♻ 📝 etc.)
 - ✅ Use English type names (e.g., `refactor`), never Chinese equivalents
+- ✅ Write the short description and body in Simplified Chinese
 - ✅ A single space must follow the colon `:` that separates the type/scope and the description
 - ✅ Use bullet points (`-`) for each change point in the body
 
 ## Examples
 
 ```
-refactor(ElaPopupBase): refactor Slide animation engine — direction-aware offset + bitflag fix + opacity guard
+refactor(ElaPopupBase): 重构 Slide 动画引擎 — 方向感知偏移 + 位标志修复 + 透明度保护
 
-- Fix bug where bitwise OR was used instead of AND, causing all animation branches to execute unconditionally
-- Fix Fade animation operating on windowOpacity while being obscured by QGraphicsOpacityEffect(opacity=0)
-- Refactor Slide animation to be direction-aware
-- Add AnimePosition enum to allow external override of direction
-- Add ElaPopupBasePrivate private implementation header (PIMPL separation)
+- 修复误用按位或代替按位与、导致所有动画分支无条件执行的问题
+- 修复 Fade 动画操作 windowOpacity 却被 QGraphicsOpacityEffect(opacity=0) 遮挡的问题
+- 将 Slide 动画重构为方向感知
+- 新增 AnimePosition 枚举以允许外部覆盖方向
+- 新增 ElaPopupBasePrivate 私有实现头（PIMPL 分离）
 
-feat(delegate): implement Delegate Layout Cache to avoid repeated layout calculations in paint()
+feat(delegate): 实现 Delegate 布局缓存，避免 paint() 中重复计算布局
 
-- CardLayoutCacheManager singleton with quad-tuple cache key
-- sizeHint/paint/editorEvent all read from cache
-- Layout offset fix; animation does not pollute cache
+- CardLayoutCacheManager 单例，四元组缓存键
+- sizeHint/paint/editorEvent 均从缓存读取
+- 修正布局偏移；动画不污染缓存
 
-fix(ElaAppBar): fix WM_GETMINMAXINFO DPI multi-screen scaling error
+fix(ElaAppBar): 修复 WM_GETMINMAXINFO 多屏 DPI 缩放错误
 
-- WM_GETMINMAXINFO callback coordinate calculation was wrong in multi-DPI environments
-- Fall back to primaryScreen logicalDotsPerInch
+- 多 DPI 环境下 WM_GETMINMAXINFO 回调坐标计算错误
+- 回退到 primaryScreen 的 logicalDotsPerInch
 ```
 
 ## Commit Granularity
@@ -92,7 +93,7 @@ fix(ElaAppBar): fix WM_GETMINMAXINFO DPI multi-screen scaling error
 
 1. Type is correct and matches the nature of the change.
 2. Scope is included when the change is limited to a single component; omitted when cross-cutting.
-3. Short description is in English, concise, and starts with a verb or noun describing the change.
+3. Short description is in Simplified Chinese, concise, and starts with a verb or noun describing the change.
 4. Em dash separator is present when a body exists.
 5. Body uses `-` bullet points for each logical change detail.
 6. No emojis or non-standard decorations.

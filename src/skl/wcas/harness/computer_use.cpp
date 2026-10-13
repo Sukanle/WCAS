@@ -109,7 +109,7 @@ LaunchConfig LaunchConfig::wine(std::string p) {
     return c.env("PROTON_ENABLE_WAYLAND", "1").env("WINE_GST_REGISTRY_DIR", "/tmp/wine-gst").gpu_accelerated();
 }
 LaunchConfig LaunchConfig::proton(std::string p) {
-    return wine(std::move(p)).env("SteamGameId", "0").graphics_api(GraphicsApi::vulkan);
+    return wine(std::move(p)).env("SteamGameId", "0").graphics_api(GraphicsApi::dxvk);
 }
 LaunchConfig LaunchConfig::umu(std::string p) {
     LaunchConfig c("umu-run");
@@ -305,10 +305,19 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
                 ::setenv("QT_QPA_PLATFORM", "wayland", 1);
             }
             if (!config.gpu_accelerated_) ::setenv("LIBGL_ALWAYS_SOFTWARE", "1", 1);
-            if (config.graphics_api_ == GraphicsApi::opengl)
-                ::setenv("PROTON_USE_WINED3D", "1", 1);
-            else
-                ::unsetenv("PROTON_USE_WINED3D");
+            switch (config.graphics_api_) {
+                case GraphicsApi::opengl: ::setenv("PROTON_USE_WINED3D", "1", 1); break;
+                case GraphicsApi::vulkan:
+                    // Native Vulkan: keep DXVK out of the way so the game uses
+                    // its own Vulkan renderer. DXVK installs itself as the
+                    // d3d9/d3d11/dxgi provider, so those have to be switched off
+                    // or Proton's DirectX translation runs regardless of what
+                    // the renderer is.
+                    ::unsetenv("PROTON_USE_WINED3D");
+                    ::setenv("WINEDLLOVERRIDES", "d3d9,d3d10core,d3d11,dxgi=n", 1);
+                    break;
+                case GraphicsApi::dxvk: ::unsetenv("PROTON_USE_WINED3D"); break;
+            }
             for (const auto &e : config.env_) {
                 if (e.second)
                     ::setenv(e.first.c_str(), e.second->c_str(), 1);
@@ -351,7 +360,14 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
         std::shared_ptr<proxy::ConnState> session;
         const auto timeout = impl_->native_timeout;
         while (std::chrono::steady_clock::now() - start_time < timeout) {
-            session = detail::session_for(child);
+            // `match_regex` matters here, not just for `list`/`target`: the
+            // process that connects to the proxy is `wineserver`, which detaches,
+            // so once an intermediate launcher (umu-run, proton.py) exits the
+            // owner is re-parented to init and the pid chain no longer reaches
+            // `child`. Matching on pid alone then never finds the session even
+            // though it is connected and capturable, the 30s timeout expires and
+            // the whole game gets killed and relaunched over XWayland.
+            session = detail::session_for(child, match_regex);
             if (session && session->connected && session->capturable_surface) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 if (session->connected) break;

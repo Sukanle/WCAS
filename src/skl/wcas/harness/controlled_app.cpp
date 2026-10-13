@@ -19,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -141,7 +142,31 @@ result<CapturedFrame> ControlledApp::capture() const {
     if (!ok) {
         ok = backend == CaptureBackend::dmabuf ? proxy::capture_shm(s, image) : proxy::capture_dmabuf(s, image);
     }
-    if (!ok) return code(errc::frame_capture_failed);
+    if (!ok) {
+        // Last resort: the window's own buffer could not be decoded (e.g. a
+        // framebuffer-compressed modifier that no import path accepts here).
+        // Fall back to the composited output, scoped to the window so a
+        // multi-monitor scanout is never returned whole.
+        std::fprintf(stderr, "[wcas] capture: window buffer undecodable, falling back to compositor capture\n");
+        std::optional<Rect> geometry;
+        if (const auto size = frame_size(); size.has_value()) {
+            std::optional<std::string> title;
+            {
+                std::lock_guard lock(s->data_mutex);
+                title = s->capture_title;
+            }
+            const std::optional<std::string_view> title_view =
+                title.has_value() ? std::optional<std::string_view>(*title) : std::nullopt;
+            geometry = find_window_position_by_size_and_title(cv::Size(size->width, size->height), title_view);
+        }
+        // grim takes compositor layout coordinates, so it stays aligned under
+        // output scaling; KMS is the in-process fallback (its crop is in raw
+        // framebuffer pixels). Both are window-scoped when `geometry` is known.
+        if (auto frame = capture_via_grim(geometry); frame.has_value()) return CapturedFrame{std::move(frame.value())};
+        if (auto frame = capture_kms_screen(geometry); frame.has_value())
+            return CapturedFrame{std::move(frame.value())};
+        return code(errc::frame_capture_failed);
+    }
     return CapturedFrame{std::move(image)};
 }
 std::optional<FrameSize> ControlledApp::frame_size() const {
@@ -547,12 +572,36 @@ result<void> ControlledApp::press_drag(
             if (!proxy::inject_pointer_motion(s, from_lx + ddx * f, from_ly + ddy * f))
                 return code(errc::input_injection_failed);
             if (!proxy::inject_pointer_frame(s)) return code(errc::input_injection_failed);
+            // Pointer-locked apps (3D camera) ignore absolute motion and only
+            // consume the relative delta; no-op when the app has no relative
+            // pointer object.
+            proxy::inject_relative_motion(s, ddx / steps, ddy / steps);
         }
         if (step_delay.count() > 0) std::this_thread::sleep_for(step_delay);
     }
 
     if (!proxy::inject_pointer_button(s, 0x110, false)) return code(errc::input_injection_failed);
     if (!proxy::inject_pointer_frame(s)) return code(errc::input_injection_failed);
+    return boost::outcome_v2::success();
+}
+result<void> ControlledApp::relative_drag(double from_x, double from_y, double dx, double dy) const {
+    if (!impl_ || !ensure_active_session()) return code(errc::input_injection_failed);
+    auto s = impl_->session;
+
+    const auto target = input_target(s);
+    if (!target) return code(errc::input_injection_failed);
+    const double from_lx = to_logical(s, target, from_x);
+    const double from_ly = to_logical(s, target, from_y);
+    const double ddx = to_logical(s, target, dx);
+    const double ddy = to_logical(s, target, dy);
+    if (!proxy::ensure_pointer_focus(s, target, from_lx, from_ly)) return code(errc::input_injection_failed);
+
+    // Move without pressing a button: the app sees motion only, so a
+    // pointer-locked camera follows the relative delta and nothing is seen as a
+    // click (unlike `press_drag`).
+    if (!proxy::inject_pointer_motion(s, from_lx + ddx, from_ly + ddy)) return code(errc::input_injection_failed);
+    if (!proxy::inject_pointer_frame(s)) return code(errc::input_injection_failed);
+    proxy::inject_relative_motion(s, ddx, ddy);
     return boost::outcome_v2::success();
 }
 void ControlledApp::stop() noexcept {
