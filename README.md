@@ -65,6 +65,13 @@ WCAS 启动一个目标应用，并在它与合成器之间插入私有 Wayland 
 
 典型场景：让自动化 agent 启动一个游戏或 GUI，看清它的画面，再把操作打回它的窗口里。
 
+### 适配的游戏
+
+| 状态 | 游戏 |
+| --- | --- |
+| 已适配 | 明日方舟、明日方舟：终末地 |
+| 计划适配 | 鸣潮、异环、绝区零 |
+
 ## 三、技术路线
 
 WCAS 分阶段推进，每一阶段都要有对应测试通过后才算完成：
@@ -75,7 +82,7 @@ WCAS 分阶段推进，每一阶段都要有对应测试通过后才算完成：
 | 2 | `wl_shm` 捕获：pool/buffer 生命周期、mmap 解码、目标选择、retained frame | 完成 |
 | 2b | wire 元数据重建：由协议 XML 生成完整 opcode/签名/`new_id` 目标表 | 完成 |
 | 3 | 输入：keymap、xkbcommon 布局、修饰键、Unicode、text-input-v3、指针/滚轮/拖拽 | 完成 |
-| 4 | DMA-BUF 与 GPU 捕获：Vulkan 导入、线性回退、reactor + 三槽调度、窗口几何 | 大部分完成 |
+| 4 | DMA-BUF 与 GPU 捕获：Vulkan / EGL+GBM 导入、按能力选后端、线性回退、合成器回退、reactor + 三槽调度、窗口几何 | 大部分完成 |
 | 4b | KMS：直接 DRM/KMS ioctl（去掉外部 helper 依赖） | **暂缓** |
 | 5 | XWayland：独立 Xwayland bridge、native 失败回退、XComposite 捕获 | 部分完成 |
 | 6 | CLI 与脚本：全部参数、窗口管理、长按/滑动、显示器、诊断 | 进行中 |
@@ -101,9 +108,11 @@ WCAS 分阶段推进，每一阶段都要有对应测试通过后才算完成：
 
 - **协议感知代理** —— 翻译 core Wayland 与 47 个扩展协议接口，处理 `new_id`、
   `SCM_RIGHTS` FD 转发、双向对象 ID 映射、registry allowlist/denylist
-- **截图** —— `wl_shm`（mmap ARGB/XRGB）与 DMA-BUF（Vulkan 导入优先，线性 mmap 回退）
+- **截图** —— `wl_shm`（mmap ARGB/XRGB）；DMA-BUF 按能力选后端（Vulkan 导入 / EGL+GBM 导入 /
+  线性 mmap），无法解码时窗口对齐回退到合成器截图（见 [docs/CAPTURE.md](docs/CAPTURE.md)）
 - **输入注入** —— keymap（xkbcommon）解析按键/修饰键、Unicode 文本（优先 text-input-v3）、
-  pointer / scroll / drag、长按、长按滑动
+  pointer / scroll / drag、长按、长按滑动、二维拖动（旋转视角/相机）；指针锁定游戏经
+  `zwp_relative_pointer_v1` 注入相对位移
 - **窗口管理** —— 枚举进程树内全部窗口（含同一进程的多条 Wayland 连接）、按索引/app_id/标题
   切换目标、标注窗口来源（toplevel / subsurface / bare）
 - **坐标换算** —— frame 像素与 surface 逻辑像素互换，支持多屏不同缩放
@@ -118,7 +127,7 @@ WCAS 分阶段推进，每一阶段都要有对应测试通过后才算完成：
 | WinAPI 后端 | 计划中，未开始 |
 | Cocoa 后端 | 计划中，未开始 |
 | 多平面 / YUV DMA-BUF | `capture_dmabuf` 目前只支持单平面 RGB |
-| KMS 抓取 | 暂缓；现有实现依赖 libdrmtap 与 `CAP_SYS_ADMIN`，后续改为直接 DRM/KMS ioctl |
+| KMS 抓取 | 已作为合成器回退接入（需 libdrmtap 与 `CAP_SYS_ADMIN`）；改为直接 DRM/KMS ioctl 暂缓 |
 | 后台三槽调度 | `capture_slot` / `capture_scheduler` 已实现但未接线到 `launch()` 流程 |
 | XWayland 完整回退 | `content_timeout` 未接入 capture，X11-only 客户端端到端未验证 |
 | 负向协议测试 | 未知 opcode / 版本越界 / 畸形签名 |
@@ -162,6 +171,8 @@ flowchart TB
 - 库：OpenCV（core/imgcodecs/imgproc）、Boost（filesystem/system/program_options）、fmt
 - 协议：libwayland（client + server）、xkbcommon、xcb + xcb-composite
 - GPU：Vulkan、libdrm ≥ 2.4.95、liburing
+- GPU（可选）：EGL + GLESv2 + GBM —— DMA-BUF 的 EGL 后端。缺失时该后端编译为 stub，
+  采集退回 Vulkan
 - 生成元数据所需：`wayland.xml`、`wayland-protocols/`、`wayland-server-protocol.h`
 - 子模块：`third_party/libdrmtap`（MIT）
 
@@ -226,7 +237,7 @@ build/Release/wcas-test-7-functions \
 | `--program, -p` | 要启动的可执行文件 |
 | `--arg, -s` / `--env, -e` | 传给程序的参数 / 环境变量（可重复） |
 | `--proton` / `--wine` / `--umu` | 启动方式 |
-| `--graphics-api, -g` | `vulkan`(`vk`/`dxvk`) 或 `opengl`(`gl`/`wined3d`) |
+| `--graphics-api, -g` | `dxvk`(默认) 或 `vulkan`(`vk`，游戏原生) 或 `opengl`(`gl`/`wined3d`) |
 | `--capture-backend, -b` | `client`(默认) / `shm` / `dmabuf` / `kms` |
 | `--bridge-width/-height, -x/-y` | XWayland 回退桥接分辨率 |
 | `--match-regex, -r` | 额外的子窗口进程匹配正则（默认取目标程序父目录） |
@@ -247,6 +258,7 @@ move <x> <y>                 移动到坐标
 click [<x> <y>]              在坐标点击（省略坐标则点当前位置）
 click <hold> <Top|Down|Left|Right|Center> [px]
                              长按滑动，如 `click 4s R 300`
+drag <dx> <dy>               不按键移动视角/光标（旋转相机，不触发点击），如 `drag 300 -120`
 up|down|left|right|center    相对移动 / 居中
 key|press <combo> [hold]     组合键，如 `key ctrl+s`、`key Alt-C`、`key Enter 3s`
 escape|esc / type <text>     单键与文本输入
@@ -264,8 +276,37 @@ list                 # 看有哪些窗口
 target 1             # 选中主窗口
 ss                   # 截一张图（等待新帧）
 click 4s R 300       # 长按 4 秒并向右滑 300px
+drag 300 -120        # 向右上移动视角（旋转相机，不触发点击）
 key Alt-C            # 发送 Alt+C
 ```
+
+### 7.3 DMA-BUF 采集后端
+
+游戏窗口通常通过 DMA-BUF 提交 `wl_buffer`，其布局由 DRM modifier 描述（可能是厂商 tiled /
+block-linear，甚至带帧缓冲压缩）。WCAS 用环境变量选择解码后端：
+
+| 变量 | 取值 | 说明 |
+| --- | --- | --- |
+| `WCAS_DMABUF_BACKEND` | `auto`(默认) / `vulkan` / `egl` | DMA-BUF 解码后端 |
+| `WCAS_CAPTURE_TIMING` | 设 `1` 打开 | 每次采集打印 `[wcas] capture timing: backend=... <ms>`（默认关闭） |
+
+三个后端：
+
+- **`vulkan`** —— `VK_EXT_image_drm_format_modifier` 显式导入 + `vkCmdCopyImageToBuffer`
+  → staging → CPU 解码；只在设备为“该格式 + modifier + `TRANSFER_SRC`”声明支持时可用。
+- **`egl`** —— EGL/GBM（`EGL_EXT_image_dma_buf_import[_modifiers]`）导入 → GL 纹理 → FBO
+  → `glReadPixels`。合成器同款路径，能解出 NVIDIA 帧缓冲压缩（modifier `c != 0`）的 surface。
+- **`auto`** —— 按**能力查询**选择：线性或 Vulkan 声明支持 → Vulkan；否则若 EGL 广播了该
+  格式+modifier → EGL；两者都不支持则**明确拒绝**，不会把驱动在不支持的布局上解出的花屏
+  当成成功。
+
+原则是“导入成功 ≠ 像素正确”：Vulkan 路径对未被声明支持的 modifier 会标
+`modifier_supported=NO | pixels=unverified`，而不是谎称已验证。
+
+当窗口自身的 buffer 两条路径都无法解码时，`auto` 会**窗口对齐**回退到合成器截图：先用
+`swaymsg`/`hyprctl`/`xdotool` 求出窗口矩形，再用 `grim -g`（合成器布局坐标，缩放安全）或
+KMS 裁剪读取合成结果，不会返回整屏或多显示器拼接。完整判定与能力查询见
+[docs/CAPTURE.md](docs/CAPTURE.md)。
 
 ## 八、现有问题
 
@@ -294,7 +335,11 @@ key Alt-C            # 发送 Alt+C
 ### 8.2 其它已知限制
 
 - **多平面 / YUV DMA-BUF** 不支持，遇到会捕获失败。
-- **KMS 抓取**依赖外部权限，暂缓。
+- **压缩 surface 依赖 EGL 后端**：NVIDIA 帧缓冲压缩（modifier `c != 0`）在 Vulkan 上既不被
+  列出也不支持 `TRANSFER_SRC`/`SAMPLED`，只能经 EGL/GBM 解出。若某设备两个后端都不广播该
+  布局，WCAS 会明确拒绝而不是输出花屏。
+- **KMS 抓取**依赖 libdrmtap 与 `CAP_SYS_ADMIN`；作为合成器回退时其裁剪按物理像素，
+  输出缩放非 1:1 时可能出现偏移（此时 `grim -g` 优先，因为用的是布局坐标）。
 - **XWayland 完整回退**未端到端验证。
 - 某些应用（如公告层、CEF）会**泄漏大量 surface** 且从不销毁；WCAS 用提交新近度区分活跃窗口，
   但历史 surface 仍会累积。
@@ -329,7 +374,7 @@ WCAS **不**为受控应用提供沙箱：被控应用仍拥有调用方用户�
 include/skl/wcas/     公共头文件（wcas.h 为主要 API）
 src/skl/wcas/
   proxy/              Wayland 代理：reactor、wire 翻译、interfaces、surface 观察、
-                      输入、截图槽位、Vulkan DMA-BUF 导入
+                      输入、截图槽位、Vulkan / EGL+GBM DMA-BUF 导入
   harness/            ComputerUse（启动器）、ControlledApp（控制）、session（会话表）
   xwayland.cpp        XWayland bridge
   x11_capture.cpp     X11/XComposite 抓取
@@ -337,7 +382,7 @@ src/skl/wcas/
   dmabuf_probe.cpp    DMA-BUF 能力探测
 codegen/              由协议 XML 生成 wire 元数据（构建期执行）
 tests/                单元测试与协议集成测试（fake Wayland 环境）
-docs/                 旧文档（含参考实现内容），待重写为原生文档
+docs/                 项目文档（CAPTURE / COMPATIBILITY / MAA-COMPARISON / Proton / SECURITY）
 proton-inject*.sh     Proton / Lutris 启动包装
 ```
 

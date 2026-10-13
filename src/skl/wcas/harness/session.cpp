@@ -65,11 +65,33 @@ std::string process_text(pid_t pid) {
     return text;
 }
 
+/// Compile `match_regex`, or nothing when it is empty or invalid.
+std::optional<std::regex> compile_pattern(const std::string &match_regex) {
+    if (match_regex.empty()) return std::nullopt;
+    try {
+        return std::regex(match_regex);
+    } catch (const std::regex_error &) {
+        return std::nullopt;
+    }
+}
+
 std::mutex sessions_mutex;
 /// Keyed by a unique connection id (never by pid: one process may open several
 /// Wayland connections).
 std::unordered_map<std::uint64_t, std::weak_ptr<proxy::ConnState>> sessions;
 std::uint64_t next_session_id = 1;
+
+/// True when `state` belongs to the launch rooted at `pid`: either the owner is
+/// `pid`/a descendant of it, or — when `pattern` is set — the owner's command
+/// line matches. The second test is what keeps a detached `wineserver` matched
+/// after its ancestors have exited and it has been re-parented to init.
+bool session_belongs_to(
+    const std::shared_ptr<proxy::ConnState> &state, pid_t pid, const std::optional<std::regex> &pattern) {
+    if (state->owner_pid <= 0) return false;
+    const auto owner = static_cast<pid_t>(state->owner_pid);
+    if (owner == pid || descendant(owner, pid)) return true;
+    return pattern && std::regex_search(process_text(owner), *pattern);
+}
 
 }   // namespace
 
@@ -101,7 +123,8 @@ void erase_sessions_for(pid_t pid) {
     }
 }
 
-std::shared_ptr<proxy::ConnState> session_for(pid_t pid) {
+std::shared_ptr<proxy::ConnState> session_for(pid_t pid, const std::string &match_regex) {
+    const auto pattern = compile_pattern(match_regex);
     std::lock_guard lock(sessions_mutex);
     std::shared_ptr<proxy::ConnState> fallback;
     auto consider = [&fallback](const std::shared_ptr<proxy::ConnState> &state) {
@@ -110,22 +133,15 @@ std::shared_ptr<proxy::ConnState> session_for(pid_t pid) {
         if (!fallback) fallback = state;
         return false;
     };
-    // `descendant(p, a)` is true when p has a as an ancestor. The session owner
-    // is the process that connected to the proxy (for umu/Wine a grandchild of
-    // the launched process), so ask whether the owner is a descendant of `pid`.
-    auto belongs = [pid](const std::shared_ptr<proxy::ConnState> &state) {
-        return state->owner_pid > 0
-            && (state->owner_pid == pid || descendant(static_cast<pid_t>(state->owner_pid), pid));
-    };
     for (auto it = sessions.begin(); it != sessions.end();) {
         auto state = it->second.lock();
         if (!state) {
             it = sessions.erase(it);
             continue;
         }
-        // Prefer an exact pid match over a mere descendant.
+        // Prefer an exact pid match over a descendant or a name match.
         if (state->owner_pid == pid && state->connected.load() && consider(state)) return state;
-        if (belongs(state) && consider(state)) return state;
+        if (session_belongs_to(state, pid, pattern) && consider(state)) return state;
         ++it;
     }
     return fallback;
@@ -133,14 +149,7 @@ std::shared_ptr<proxy::ConnState> session_for(pid_t pid) {
 
 std::vector<std::shared_ptr<proxy::ConnState>> sessions_for(pid_t pid, const std::string &match_regex) {
     std::vector<std::shared_ptr<proxy::ConnState>> out;
-    std::optional<std::regex> pattern;
-    if (!match_regex.empty()) {
-        try {
-            pattern.emplace(match_regex);
-        } catch (const std::regex_error &) {
-            pattern.reset();
-        }
-    }
+    const auto pattern = compile_pattern(match_regex);
     std::lock_guard lock(sessions_mutex);
     for (auto it = sessions.begin(); it != sessions.end();) {
         auto state = it->second.lock();
@@ -155,13 +164,7 @@ std::vector<std::shared_ptr<proxy::ConnState>> sessions_for(pid_t pid, const std
             ++it;
             continue;
         }
-        bool include = false;
-        if (state->owner_pid > 0) {
-            const auto owner = static_cast<pid_t>(state->owner_pid);
-            include = owner == pid || descendant(owner, pid);
-            if (!include && pattern) include = std::regex_search(process_text(owner), *pattern);
-        }
-        if (include) out.push_back(state);
+        if (session_belongs_to(state, pid, pattern)) out.push_back(state);
         ++it;
     }
     std::sort(out.begin(), out.end(), [](const auto &a, const auto &b) { return a->owner_pid < b->owner_pid; });
@@ -170,14 +173,7 @@ std::vector<std::shared_ptr<proxy::ConnState>> sessions_for(pid_t pid, const std
 
 std::vector<SessionStatus> session_status(pid_t root, const std::string &match_regex) {
     std::vector<SessionStatus> out;
-    std::optional<std::regex> pattern;
-    if (!match_regex.empty()) {
-        try {
-            pattern.emplace(match_regex);
-        } catch (const std::regex_error &) {
-            pattern.reset();
-        }
-    }
+    const auto pattern = compile_pattern(match_regex);
     std::lock_guard lock(sessions_mutex);
     for (auto it = sessions.begin(); it != sessions.end();) {
         auto state = it->second.lock();
@@ -188,11 +184,7 @@ std::vector<SessionStatus> session_status(pid_t root, const std::string &match_r
         SessionStatus status;
         status.owner_pid = static_cast<long>(state->owner_pid);
         status.connected = state->connected.load();
-        if (state->owner_pid > 0) {
-            const auto owner = static_cast<pid_t>(state->owner_pid);
-            status.matched = owner == root || descendant(owner, root);
-            if (!status.matched && pattern) status.matched = std::regex_search(process_text(owner), *pattern);
-        }
+        status.matched = session_belongs_to(state, root, pattern);
         status.windows = proxy::list_windows(state).size();
         const auto counters = proxy::session_counters(state);
         status.surfaces = counters.surfaces;

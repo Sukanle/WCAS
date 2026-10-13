@@ -178,6 +178,31 @@ bool inject_pointer_motion(const std::shared_ptr<ConnState> &state, double sx, d
     return send_message(state->client_fd, msg);
 }
 
+bool inject_relative_motion(const std::shared_ptr<ConnState> &state, double dx, double dy) {
+    if (!state) return false;
+    std::lock_guard lock(state->data_mutex);
+    std::uint32_t relative_pointer = 0;
+    for (const auto &[object, role] : state->object_role_enum) {
+        if (role == Role::RelativePointer) {
+            relative_pointer = object;
+            break;
+        }
+    }
+    if (!relative_pointer) return false;
+    // zwp_relative_pointer_v1.relative_motion: utime_hi, utime_lo, dx, dy,
+    // dx_unaccel, dy_unaccel (all fixed except the split 64-bit timestamp).
+    const std::uint64_t utime = static_cast<std::uint64_t>(input_timestamp_ms()) * 1'000ULL;
+    std::vector<std::uint32_t> msg(8);
+    wl_header(msg, relative_pointer, 0);
+    msg[2] = static_cast<std::uint32_t>(utime >> 32);
+    msg[3] = static_cast<std::uint32_t>(utime & 0xffffffffULL);
+    msg[4] = wl_fixed(dx);
+    msg[5] = wl_fixed(dy);
+    msg[6] = wl_fixed(dx);
+    msg[7] = wl_fixed(dy);
+    return send_message(state->client_fd, msg);
+}
+
 bool inject_pointer_button(const std::shared_ptr<ConnState> &state, std::uint32_t button, bool pressed) {
     if (!state || !state->pointer_obj) return false;
     std::lock_guard lock(state->data_mutex);

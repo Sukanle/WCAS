@@ -36,6 +36,13 @@ bool ensure_pointer_focus(const std::shared_ptr<ConnState> &state, std::uint32_t
 /// Send wl_pointer.motion event to the app.
 bool inject_pointer_motion(const std::shared_ptr<ConnState> &state, double sx, double sy);
 
+/// Send zwp_relative_pointer_v1.relative_motion to the app's relative pointer,
+/// if it has one. Pointer-locked games (3D camera control) ignore absolute
+/// `wl_pointer.motion` and only consume this relative delta, so a press-and-drag
+/// without it is seen as a bare click. Returns false when the app has no
+/// relative pointer object (the caller then relies on absolute motion alone).
+bool inject_relative_motion(const std::shared_ptr<ConnState> &state, double dx, double dy);
+
 /// Send wl_pointer.button event to the app (pressed=true for press, false for release).
 bool inject_pointer_button(const std::shared_ptr<ConnState> &state, std::uint32_t button, bool pressed);
 

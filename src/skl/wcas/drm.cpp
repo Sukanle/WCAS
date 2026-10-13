@@ -385,6 +385,9 @@ auto find_window_position_by_size_and_title(Size size, std::optional<std::string
         if (auto rect = from_swaytree_by_size_and_title(*output, size, title)) return rect;
     }
     if (auto rect = from_hyprctl_by_size_and_title(size, title)) return rect;
+    // X11/XWayland: xdotool reports the active window, which is the captured app
+    // while it holds focus.
+    if (auto rect = from_xdotool_by_size_and_title(size, title)) return rect;
     return std::nullopt;
 }
 

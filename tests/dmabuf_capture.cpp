@@ -6,6 +6,7 @@
 // proxy's linear readback path supports.
 
 #include "proxy/conn.h"
+#include "proxy/egl_dmabuf.h"
 #include "proxy/vulkan_dmabuf.h"
 
 #ifdef WCAS_HAVE_GBM
@@ -188,14 +189,16 @@ struct Fake {
 };
 
 /// Add one plane to a params object and create an immediate buffer from it.
+/// `modifier_hi`/`modifier_lo` default to DRM_FORMAT_MOD_LINEAR.
 void submit_dmabuf(int app_fd, int compositor_fd, std::uint32_t params_id, std::uint32_t buffer_id, int width,
-    int height, std::uint32_t format, int fd, std::uint32_t offset, std::uint32_t stride) {
+    int height, std::uint32_t format, int fd, std::uint32_t offset, std::uint32_t stride, std::uint32_t modifier_hi = 0,
+    std::uint32_t modifier_lo = 0) {
     auto add = message(params_id, 1);   // zwp_linux_buffer_params_v1.add = "huuuuu"
     put(add, 0);                        // plane index
     put(add, offset);
     put(add, stride);
-    put(add, 0);   // modifier high (DRM_FORMAT_MOD_LINEAR)
-    put(add, 0);   // modifier low
+    put(add, modifier_hi);
+    put(add, modifier_lo);
     finish(add);
     send_message(app_fd, add, fd);
     receive(compositor_fd);
@@ -238,8 +241,13 @@ void attach_and_commit(int app_fd, int compositor_fd, std::uint32_t surface_id, 
 }
 
 }   // namespace
-
 int main() {
+    // EGL backend: probing availability must be safe (false on a GPU-less host),
+    // and an invalid descriptor must be refused rather than crash.
+    namespace proxy = skl::wcas::proxy;
+    (void)proxy::egl_dmabuf_available();
+    assert(!proxy::egl_read_dmabuf(-1, 4, 3, 16, 0, drm_argb8888, 0).has_value());
+
     Fake fake;
     int app_fd = fake.app[1];
     int compositor_fd = fake.compositor[1];
@@ -341,6 +349,48 @@ int main() {
     ::close(bad_fd);
     attach_and_commit(app_fd, compositor_fd, surface_id, bad_buffer);
     assert(!skl::wcas::proxy::capture_dmabuf(state, image));
+
+    // --- a tiled/compressed modifier is never decoded as if it were linear ---
+    // The bytes here are a plain linear gradient, so a naive row walk would
+    // happily return a plausible-looking picture. Only the modifier says the
+    // real layout is not linear, so capture has to refuse rather than emit a
+    // scrambled frame that looks like a successful screenshot.
+    const std::uint32_t tiled_params = 30;
+    const std::uint32_t tiled_buffer = 31;
+    create_params(app_fd, compositor_fd, dmabuf_id, tiled_params);
+    std::uint32_t t_stride = 0;
+    std::uint32_t t_offset = 0;
+    std::size_t t_size = 0;
+    const int t_fd = make_dmabuf(width, height, &t_stride, &t_offset, &t_size);
+    submit_dmabuf(app_fd, compositor_fd, tiled_params, tiled_buffer, width, height, drm_argb8888, t_fd, t_offset,
+        t_stride, 0x00000001u, 0x00abcdefu);   // DRM_FORMAT_MOD_VENDOR|tiled
+    ::close(t_fd);
+    attach_and_commit(app_fd, compositor_fd, surface_id, tiled_buffer);
+    assert(!skl::wcas::proxy::capture_dmabuf(state, image));
+
+    // --- but DRM_FORMAT_MOD_LINEAR | TILED is still a linear layout ---
+    const std::uint32_t linear_tiled_params = 32;
+    const std::uint32_t linear_tiled_buffer = 33;
+    create_params(app_fd, compositor_fd, dmabuf_id, linear_tiled_params);
+    std::uint32_t lt_stride = 0;
+    std::uint32_t lt_offset = 0;
+    std::size_t lt_size = 0;
+    const int lt_fd = make_dmabuf(width, height, &lt_stride, &lt_offset, &lt_size);
+    submit_dmabuf(app_fd, compositor_fd, linear_tiled_params, linear_tiled_buffer, width, height, drm_argb8888, lt_fd,
+        lt_offset, lt_stride, 0, 1);   // DRM_FORMAT_MOD_TILED on its own
+    ::close(lt_fd);
+    attach_and_commit(app_fd, compositor_fd, surface_id, linear_tiled_buffer);
+    assert(skl::wcas::proxy::capture_dmabuf(state, image));
+    assert(image.rows == height && image.cols == width);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const int i = y * width + x;
+            const auto px = image.at<cv::Vec3b>(y, x);
+            assert(px[0] == static_cast<unsigned char>(i));
+            assert(px[1] == static_cast<unsigned char>(i + 10));
+            assert(px[2] == static_cast<unsigned char>(i + 20));
+        }
+    }
 
     // --- a multi-plane buffer is rejected (needs GPU interop) ---
     const std::uint32_t multi_params = 24;

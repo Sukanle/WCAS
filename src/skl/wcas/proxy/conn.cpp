@@ -26,7 +26,7 @@
 #include <vector>
 
 #include <opencv2/core.hpp>
-#include <fmt/base.h>
+#include <fmt/format.h>
 
 namespace skl::wcas::proxy {
 
@@ -1162,6 +1162,8 @@ bool capture_shm(const std::shared_ptr<ConnState> &state, cv::Mat &image) {
             }
         }
     }
+    trace_capture(fmt::format("shm {}x{} format={} stride={} (w*4={}) offset={} pool={}", buffer.width, buffer.height,
+        buffer.format, buffer.stride, buffer.width * 4, buffer.offset, buffer.pool_size));
     ::munmap(mapped, static_cast<std::size_t>(buffer.pool_size));
     image = std::move(result);
     return true;

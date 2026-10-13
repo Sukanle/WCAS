@@ -384,6 +384,28 @@ int main() {
     assert(get(motion, 12) == 7 * 256);
     assert(get(motion, 16) == 8 * 256);
 
+    // --- relative pointer: pointer-locked games (3D camera) need this ---
+    // The app creates a zwp_relative_pointer_v1 through the manager; the proxy
+    // records its role and can then inject relative_motion deltas, which is what
+    // a press-and-drag on a locked pointer actually drives the camera with.
+    const std::uint32_t relative_manager_id = 13;
+    bind_global(app_fd, compositor_fd, registry_id, 15, "zwp_relative_pointer_manager_v1", relative_manager_id);
+    const std::uint32_t relative_pointer_id = 40;
+    auto get_relative = message(relative_manager_id, 1);   // get_relative_pointer(new_id, pointer); destroy is opcode 0
+    put(get_relative, relative_pointer_id);
+    put(get_relative, pointer_id);
+    finish(get_relative);
+    send_message(app_fd, get_relative);
+    const auto forwarded_relative = receive(compositor_fd);
+    assert(get(forwarded_relative, 8) == relative_pointer_id);
+
+    assert(skl::wcas::proxy::inject_relative_motion(state, 3.0, -4.0));
+    const auto relative_motion = receive(compositor_fd);
+    assert(get(relative_motion, 0) == relative_pointer_id);
+    assert((get(relative_motion, 4) & 0xffffu) == 0);   // zwp_relative_pointer_v1.relative_motion
+    assert(get(relative_motion, 16) == 3 * 256);        // dx
+    assert(static_cast<std::int32_t>(get(relative_motion, 20)) == -4 * 256);   // dy
+
     assert(skl::wcas::proxy::inject_pointer_axis_source(state, 0));
     const auto axis_source = receive(compositor_fd);
     assert((get(axis_source, 4) & 0xffffu) == 6);   // wl_pointer.axis_source

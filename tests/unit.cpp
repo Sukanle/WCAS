@@ -8,6 +8,8 @@
 #include "proxy/interfaces.h"
 #include <cassert>
 #include <memory>
+#include <string>
+#include <unistd.h>
 
 int main() {
     const auto *shm = skl::wcas::proxy::wire::find("wl_shm");
@@ -83,6 +85,43 @@ int main() {
         assert(seen == 2);
         skl::wcas::detail::erase_sessions_for(4'242);
         assert(skl::wcas::detail::sessions_for(4'242, "").empty());
+    }
+
+    // A detached `wineserver` is the normal case for umu/Proton: it connects to
+    // the proxy but is not a descendant of the launched process once its
+    // ancestors have exited. The pid chain alone must not be the only test, or
+    // the native launch times out and kills the game even though a connected,
+    // capturable session exists. Use this test process as a stand-in owner and
+    // a pid it is provably not descended from.
+    {
+        const pid_t orphan_owner = ::getpid();
+        const pid_t unrelated_root = 999'999'999;   // no process, not an ancestor
+        char self_exe[4'096] = {};
+        const auto exe_len = ::readlink("/proc/self/exe", self_exe, sizeof(self_exe) - 1);
+        assert(exe_len > 0);
+
+        auto state = std::make_shared<skl::wcas::proxy::ConnState>();
+        state->owner_pid = orphan_owner;
+        state->connected = true;
+        state->capturable_surface = true;
+        skl::wcas::detail::register_session(orphan_owner, state);
+
+        // pid-only lookup must miss it: the chain from `orphan_owner` never
+        // contains `unrelated_root`.
+        assert(!skl::wcas::detail::session_for(unrelated_root));
+
+        // The command line / executable fallback must find it.
+        const std::string exe_pattern = std::string(self_exe, static_cast<std::size_t>(exe_len));
+        assert(skl::wcas::detail::session_for(unrelated_root, exe_pattern) == state);
+
+        // An unrelated pattern must still miss it, so the fallback cannot match
+        // every session in the process.
+        assert(!skl::wcas::detail::session_for(unrelated_root, "definitely-not-this-binary"));
+
+        // An invalid regex must be ignored rather than throw.
+        assert(!skl::wcas::detail::session_for(unrelated_root, "([unclosed"));
+
+        skl::wcas::detail::erase_sessions_for(orphan_owner);
     }
     return 0;
 }
