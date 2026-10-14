@@ -241,7 +241,10 @@ int main(int argc, char **argv) {
     }
 
     // Debug categories are surfaced through WCAS_DEBUG (the C++ log gate).
-    if (debug.all || debug.capture || debug.dmabuf) setenv("WCAS_DEBUG", "1", 1);
+    // --debug-dmabuf is an independent gate (WCAS_DEBUG_DMABUF) so the DMA-BUF
+    // diagnostics can be turned on without the rest of the debug categories.
+    if (debug.all || debug.capture) setenv("WCAS_DEBUG", "1", 1);
+    if (debug.dmabuf) setenv("WCAS_DEBUG_DMABUF", "1", 1);
     if (probe_dmabuf) setenv("WCAS_DMABUF_PROBE", "1", 1);
 
     // --test-dmabuf <FD>: probe a specific DMA-BUF fd and exit.

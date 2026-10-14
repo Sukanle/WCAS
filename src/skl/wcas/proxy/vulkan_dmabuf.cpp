@@ -315,7 +315,17 @@ bool ensure_staging(Device &d, VkDeviceSize required) {
 
 }   // namespace
 
+/// `WCAS_DEBUG_DMABUF` (set by `--debug-dmabuf`) is the dedicated gate for the
+/// per-buffer capture diagnostics below; `WCAS_DEBUG` (`--debug-all`) also turns
+/// them on as the umbrella category. Off by default: every commit prints one of
+/// these, so they would otherwise flood the log during normal playback.
+bool dmabuf_trace_enabled() {
+    static const bool enabled = ::getenv("WCAS_DEBUG_DMABUF") != nullptr || ::getenv("WCAS_DEBUG") != nullptr;
+    return enabled;
+}
+
 void trace_capture(std::string message) {
+    if (!dmabuf_trace_enabled()) return;
     int seen = 0;
     {
         std::lock_guard lock(g_trace_mutex);
