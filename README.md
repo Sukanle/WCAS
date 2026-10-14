@@ -332,7 +332,28 @@ KMS 裁剪读取合成结果，不会返回整屏或多显示器拼接。完整�
 后续可能的方向：改走 X11/XWayland 注入（Wine 对 X11 输入处理更成熟），或在合成器层
 真正激活窗口后再注入。
 
-### 8.2 其它已知限制
+### 8.2 终末地启动偶发退出（Exit 222）
+
+现象：经 WCAS 启动《明日方舟：终末地》时，**偶尔**在加载初期（LOGO 之后）进程整体退出，
+退出码 **222**（腾讯 WeTest CrashSight 致命异常）。
+
+排查结论：**根因是腾讯 ACE 反作弊驱动与 Wine/Proton 的 win32 内核接口不兼容，不是 WCAS 的问题。**
+
+- 游戏日志可见 ACE 驱动调用 Wine 未实现的内核函数，Wine 直接 abort：
+  ```
+  wine: Call from ... to unimplemented function ntoskrnl.exe.InbvAcquireDisplayOwnership, aborting
+  wine: Call from ... to unimplemented function ntoskrnl.exe.SeQueryInformationToken, aborting
+  ```
+- 这些 abort 在**不经 WCAS、直连 `umu-run`** 时同样出现；直连通常存活，经 WCAS（私有 Wayland
+  代理）时偶发致命。代理只改变了时序，且逐条消息对比确认**代理没有漏转发或
+  改写消息**——根因不在 WCAS。
+- 相关上游：DW-Proton issue #64 曾据此提交 `ntoskrnl` stub 补丁，但被维护者判定为启动参数
+  误判并关闭（stock Proton 可正常启动）。
+
+缓解：换用已验证的 Proton（GE / Experimental / CachyOS），或关注 Wine/DW-Proton 对上述
+`ntoskrnl` 函数的支持。WCAS 侧无法修复 Wine 内部未实现的接口。
+
+### 8.3 其它已知限制
 
 - **多平面 / YUV DMA-BUF** 不支持，遇到会捕获失败。
 - **压缩 surface 依赖 EGL 后端**：NVIDIA 帧缓冲压缩（modifier `c != 0`）在 Vulkan 上既不被
