@@ -1,5 +1,7 @@
 #include "harness/session.h"
 
+#include "debug.h"
+
 #include <algorithm>
 #include <chrono>
 #include <csignal>
@@ -99,6 +101,8 @@ void register_session(pid_t pid, const std::shared_ptr<proxy::ConnState> &state)
     (void)pid;   // owner_pid already lives on the state
     std::lock_guard lock(sessions_mutex);
     sessions[next_session_id++] = state;
+    debug_trace(
+        DebugCategory::Harness, fmt::format("session registered owner_pid={}", static_cast<long>(state->owner_pid)));
 }
 
 void erase_session(const std::shared_ptr<proxy::ConnState> &state) {
@@ -203,6 +207,7 @@ std::vector<SessionStatus> session_status(pid_t root, const std::string &match_r
 
 void terminate_group(pid_t pid) noexcept {
     if (pid <= 0) return;
+    debug_trace(DebugCategory::Harness, fmt::format("terminating process group pid={}", pid));
     const auto group = -pid;
     ::kill(group, SIGINT);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);

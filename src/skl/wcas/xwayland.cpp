@@ -1,5 +1,7 @@
 #include "xwayland.h"
 
+#include "debug.h"
+
 #include <xcb/xcb.h>
 
 #include <csignal>
@@ -70,6 +72,8 @@ bool XwaylandBridge::start(const std::string &wayland_display, int display_numbe
 
     display_ = ":" + std::to_string(display_number);
     xauthority_ = runtime_dir_ + "/Xauthority";
+    debug_trace(
+        DebugCategory::Xwayland, fmt::format("bridge starting display={} wayland={}", display_, wayland_display));
     const std::string cookie = generate_cookie();
     if (!write_xauthority(xauthority_, cookie)) return false;
 
@@ -98,9 +102,12 @@ bool XwaylandBridge::start(const std::string &wayland_display, int display_numbe
     }
 
     if (!wait_until_serving(display_, 5'000)) {
+        debug_trace(DebugCategory::Xwayland, fmt::format("bridge failed to serve display={}", display_));
         stop();
         return false;
     }
+    debug_trace(DebugCategory::Xwayland,
+        fmt::format("bridge serving display={} (child pid={})", display_, static_cast<long>(child_)));
     return true;
 }
 

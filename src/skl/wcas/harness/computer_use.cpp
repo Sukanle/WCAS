@@ -1,6 +1,7 @@
 #include "skl/wcas/wcas.h"
 #include "skl/wcas/error.h"
 
+#include "debug.h"
 #include "harness/controlled_app_impl.h"
 #include "harness/session.h"
 #include "x11_capture.h"
@@ -227,11 +228,15 @@ result<ComputerUse> ComputerUse::create() {
             socklen_t length = sizeof(credentials);
             if (::getsockopt(client, SOL_SOCKET, SO_PEERCRED, &credentials, &length) != 0
                 || credentials.uid != ::getuid()) {
+                debug_trace(DebugCategory::Harness, fmt::format("rejected proxy connection uid={} (expected {})",
+                                                        credentials.uid, static_cast<int>(::getuid())));
                 ::close(client);
                 continue;
             }
             const auto upstream = connect_wayland(state->runtime, state->upstream);
             if (upstream < 0) {
+                debug_trace(DebugCategory::Harness,
+                    fmt::format("upstream compositor connect failed for pid={}", credentials.pid));
                 ::close(client);
                 continue;
             }
@@ -239,11 +244,16 @@ result<ComputerUse> ComputerUse::create() {
             session->owner_pid = credentials.pid;
             session->client_fd = client;
             detail::register_session(credentials.pid, session);
+            debug_trace(
+                DebugCategory::Harness, fmt::format("proxy accepted connection pid={} client_fd={} upstream_fd={}",
+                                            credentials.pid, client, upstream));
             {
                 std::lock_guard lock(state->connection_mutex);
                 state->connection_states.push_back(session);
                 state->connection_threads.emplace_back([client, upstream, session] {
                     proxy::Connection(client, upstream, session).run();
+                    debug_trace(DebugCategory::Harness, fmt::format("proxy connection ended pid={} client_fd={}",
+                                                            static_cast<long>(session->owner_pid), client));
                     detail::erase_session(session);
                 });
             }
@@ -377,6 +387,7 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
         // spawn failure.
         bool session_seen = false;
         const auto timeout = impl_->native_timeout;
+        auto last_trace = start_time;
         while (std::chrono::steady_clock::now() - start_time < timeout) {
             // `match_regex` matters here, not just for `list`/`target`: the
             // process that connects to the proxy is `wineserver`, which detaches,
@@ -387,6 +398,18 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
             // the whole game gets killed and relaunched over XWayland.
             session = detail::session_for(child, match_regex);
             if (session && session->connected.load()) session_seen = true;
+            if (debug_enabled(DebugCategory::Harness)
+                && std::chrono::steady_clock::now() - last_trace >= std::chrono::seconds(1)) {
+                last_trace = std::chrono::steady_clock::now();
+                const auto elapsed =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time)
+                        .count();
+                debug_trace(DebugCategory::Harness,
+                    fmt::format("native wait {}ms: session={} connected={} capturable={} commits={}", elapsed,
+                        session ? "yes" : "no", session && session->connected.load() ? 1 : 0,
+                        session && session->capturable_surface.load() ? 1 : 0,
+                        session ? session->commit_count.load() : 0));
+            }
             if (session && session->connected && session->capturable_surface) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 if (session->connected) break;
@@ -394,6 +417,10 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
             }
             int status = 0;
             if (::waitpid(child, &status, WNOHANG) == child) {
+                debug_trace(DebugCategory::Harness,
+                    fmt::format("native child pid={} exited (status={}), session={} connected={} session_seen={}",
+                        child, WIFEXITED(status) ? WEXITSTATUS(status) : -1, session ? "yes" : "no",
+                        session && session->connected.load() ? 1 : 0, session_seen ? 1 : 0));
                 // A launcher (umu-run / proton.py) exits after spawning the real
                 // game, which keeps running under a descendant. Only fail when no
                 // session ever connected at all; otherwise keep waiting for the
@@ -404,6 +431,12 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
             std::this_thread::sleep_for(std::chrono::milliseconds(25));
         }
         if (!session || !session->connected || !session->capturable_surface) {
+            debug_trace(DebugCategory::Harness,
+                fmt::format("native timed out after {}ms (session={} connected={} capturable={} commits={})",
+                    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time)
+                        .count(),
+                    session ? "yes" : "no", session && session->connected.load() ? 1 : 0,
+                    session && session->capturable_surface.load() ? 1 : 0, session ? session->commit_count.load() : 0));
             detail::terminate_group(child);
             return code(errc::native_wayland_timeout);
         }
@@ -413,21 +446,30 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
         app->session = std::move(session);
         app->transport = Transport::native_wayland;
         app->match_regex = match_regex;
+        debug_trace(DebugCategory::Harness, "native session ready (capturable)");
         return ControlledApp(std::move(app));
     };
 
     // 1) Native Wayland first; fall back to an authenticated XWayland bridge.
     if (auto native = attempt(false, "", "", nullptr); native) return native;
+    debug_trace(DebugCategory::Harness, "native Wayland failed, falling back to XWayland bridge");
     if (impl_->fallback_timeout.count() <= 0) return code(errc::native_wayland_timeout);
 
     auto bridge = std::make_unique<XwaylandBridge>();
-    if (!bridge->start(impl_->socket_name, 5)) return code(errc::xwayland_bridge_failed);
+    if (!bridge->start(impl_->socket_name, 5)) {
+        debug_trace(DebugCategory::Harness, "XWayland bridge start failed");
+        return code(errc::xwayland_bridge_failed);
+    }
     // Copy the strings before moving the bridge: argument evaluation order is
     // unspecified, so `bridge->display()` could otherwise run after the move.
     const std::string x11_display = bridge->display();
     const std::string x11_xauthority = bridge->xauthority();
+    debug_trace(DebugCategory::Harness, fmt::format("XWayland bridge display={}", x11_display));
     auto fallback = attempt(true, x11_display, x11_xauthority, std::move(bridge));
-    if (!fallback) return code(errc::xwayland_bridge_failed);
+    if (!fallback) {
+        debug_trace(DebugCategory::Harness, "XWayland fallback failed");
+        return code(errc::xwayland_bridge_failed);
+    }
     return fallback;
 }
 

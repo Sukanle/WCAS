@@ -25,12 +25,22 @@ using namespace skl::wcas;
 struct DebugFlags {
     bool capture = false;
     bool dmabuf = false;
+    bool harness = false;
+    bool proxy = false;
+    bool input = false;
+    bool xwayland = false;
+    bool wire = false;
     bool all = false;
 
     [[nodiscard]] std::string describe() const {
         std::vector<std::string> parts;
         if (all || capture) parts.emplace_back("capture");
         if (all || dmabuf) parts.emplace_back("dmabuf");
+        if (all || harness) parts.emplace_back("harness");
+        if (all || proxy) parts.emplace_back("proxy");
+        if (all || input) parts.emplace_back("input");
+        if (all || xwayland) parts.emplace_back("xwayland");
+        if (all || wire) parts.emplace_back("wire");
         if (parts.empty()) return "none";
         std::string joined;
         for (const auto &part : parts) {
@@ -147,6 +157,11 @@ int main(int argc, char **argv) {
         ("debug-all", po::bool_switch(&debug.all), "enable all debug categories")
         ("debug-capture", po::bool_switch(&debug.capture), "enable capture debug logs")
         ("debug-dmabuf", po::bool_switch(&debug.dmabuf), "enable dmabuf debug logs")
+        ("debug-harness", po::bool_switch(&debug.harness), "enable harness (launch/fallback) debug logs")
+        ("debug-proxy", po::bool_switch(&debug.proxy), "enable proxy lifecycle debug logs")
+        ("debug-input", po::bool_switch(&debug.input), "enable input injection debug logs")
+        ("debug-xwayland", po::bool_switch(&debug.xwayland), "enable XWayland bridge debug logs")
+        ("debug-wire", po::bool_switch(&debug.wire), "enable per-message Wayland tracing")
         ("debug-rawdump", po::bool_switch(), "dump raw frames to disk")
         ("test-dmabuf", po::value<int>(), "probe a specific DMA-BUF fd and exit")
         ("probe-dmabuf", po::bool_switch(&probe_dmabuf), "probe DMA-BUF sync capability")
@@ -240,11 +255,16 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    // Debug categories are surfaced through WCAS_DEBUG (the C++ log gate).
-    // --debug-dmabuf is an independent gate (WCAS_DEBUG_DMABUF) so the DMA-BUF
-    // diagnostics can be turned on without the rest of the debug categories.
+    // Debug categories are surfaced through WCAS_DEBUG (the C++ umbrella gate);
+    // the remaining flags set their own WCAS_DEBUG_<CATEGORY> so a single
+    // category can be traced without pulling in the rest.
     if (debug.all || debug.capture) setenv("WCAS_DEBUG", "1", 1);
     if (debug.dmabuf) setenv("WCAS_DEBUG_DMABUF", "1", 1);
+    if (debug.harness) setenv("WCAS_DEBUG_HARNESS", "1", 1);
+    if (debug.proxy) setenv("WCAS_DEBUG_PROXY", "1", 1);
+    if (debug.input) setenv("WCAS_DEBUG_INPUT", "1", 1);
+    if (debug.xwayland) setenv("WCAS_DEBUG_XWAYLAND", "1", 1);
+    if (debug.wire) setenv("WCAS_DEBUG_WIRE", "1", 1);
     if (probe_dmabuf) setenv("WCAS_DMABUF_PROBE", "1", 1);
 
     // --test-dmabuf <FD>: probe a specific DMA-BUF fd and exit.

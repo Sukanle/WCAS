@@ -1,6 +1,7 @@
 #include "skl/wcas/wcas.h"
 #include "skl/wcas/error.h"
 
+#include "debug.h"
 #include "harness/controlled_app_impl.h"
 #include "harness/session.h"
 #include "skl/wcas/drm.h"
@@ -454,11 +455,9 @@ result<void> ControlledApp::press_key_hold(std::string combination, std::chrono:
     // Wine maps keyboard focus to the window via the surface that carries the
     // xdg_toplevel, so enter that one rather than the rendering subsurface.
     const auto focus_surface = proxy::keyboard_surface(s, surface);
-    if (std::getenv("WCAS_DEBUG")) {
-        std::fprintf(stderr,
-            "DEBUG input: press_key '%s' session_pid=%ld keyboard_obj=%u target_surface=%u focus_surface=%u\n",
-            combination.c_str(), static_cast<long>(s->owner_pid), s->keyboard_obj, surface, focus_surface);
-    }
+    debug_trace(DebugCategory::Input,
+        fmt::format("press_key '{}' session_pid={} keyboard_obj={} target_surface={} focus_surface={}", combination,
+            static_cast<long>(s->owner_pid), s->keyboard_obj, surface, focus_surface));
 
     const auto parsed = proxy::parse_key_combination(combination);
     if (parsed.key.empty()) return code(errc::input_injection_failed);
