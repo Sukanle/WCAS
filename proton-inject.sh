@@ -35,7 +35,14 @@
 #   --env KEY=VALUE        额外环境变量（可重复）
 #   --game-arg ARG         传递给游戏的参数（可重复）
 #   --cli                  启用命令行交互模式
-#   --debug                启用截图/捕获调试日志（AGENT_SEAT_CAPTURE_DEBUG）
+#   --debug-all            启用全部调试类别
+#   --debug-capture        截图/采集调试日志
+#   --debug-dmabuf         DMA-BUF 导入/回读诊断
+#   --debug-harness        启动/native 等待/XWayland 回退
+#   --debug-proxy          连接生命周期与消息转发
+#   --debug-input          输入注入
+#   --debug-xwayland       XWayland 桥
+#   --debug-wire           逐条 Wayland 消息追踪
 #   --native-timeout SEC   Wayland 超时秒数（默认 30）
 #   --fallback-timeout SEC XWayland 回退超时秒数（默认 120）
 #   --content-timeout SEC  内容渲染超时秒数（默认 120）
@@ -98,6 +105,11 @@ debug_args=(
     [0]="--debug-capture"    # 位0，值 0x01
     [1]="--debug-dmabuf"     # 位1，值 0x02
     [2]="--debug-rawdump"    # 位2，值 0x04
+    [3]="--debug-harness"    # 位3，值 0x08
+    [4]="--debug-proxy"      # 位4，值 0x10
+    [5]="--debug-input"      # 位5，值 0x20
+    [6]="--debug-xwayland"   # 位6，值 0x40
+    [7]="--debug-wire"       # 位7，值 0x80
 )
 NATIVE_TIMEOUT="${NATIVE_TIMEOUT:-30}"
 FALLBACK_TIMEOUT="${FALLBACK_TIMEOUT:-120}"
@@ -176,6 +188,26 @@ while [[ $# -gt 0 ]]; do
             ;;
         --debug-rawdump)
             ((DEBUG_MODE|=0X04))
+            shift
+            ;;
+        --debug-harness)
+            ((DEBUG_MODE|=0X08))
+            shift
+            ;;
+        --debug-proxy)
+            ((DEBUG_MODE|=0X10))
+            shift
+            ;;
+        --debug-input)
+            ((DEBUG_MODE|=0X20))
+            shift
+            ;;
+        --debug-xwayland)
+            ((DEBUG_MODE|=0X40))
+            shift
+            ;;
+        --debug-wire)
+            ((DEBUG_MODE|=0X80))
             shift
             ;;
         --native-timeout)

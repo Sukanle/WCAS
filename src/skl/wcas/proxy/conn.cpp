@@ -2,6 +2,7 @@
 #include "input.h"
 #include "interfaces.h"
 #include "capture_scheduler.h"
+#include "debug.h"
 #include "reactor.h"
 #include "vulkan_dmabuf.h"
 #include "wire_meta.h"
@@ -405,6 +406,9 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
     const auto role_it = state.object_roles.find(role_id);
     const std::string role =
         role_it == state.object_roles.end() ? (original_sender == 1 ? "wl_display" : "") : role_it->second;
+    debug_trace(
+        DebugCategory::Wire, fmt::format("{} {} obj={} opcode={} len={}", app_to_upstream ? "app->srv" : "srv->app",
+                                 role.empty() ? "?" : role, original_sender, opcode, msg.size()));
 
     // `xdg_activation_v1.activate` (opcode 2) lets the app ask the compositor to
     // focus its window. A synthetic click injected by wcas reaches the app,
@@ -414,8 +418,7 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
     // window can be activated and then accept synthetic keyboard input).
     if (app_to_upstream && role == "xdg_activation_v1" && opcode == 2) {
         const bool allow = state.allow_activation.load();
-        if (std::getenv("WCAS_DEBUG"))
-            std::fprintf(stderr, "DEBUG activation: xdg_activation.activate forwarded=%d\n", allow ? 1 : 0);
+        debug_trace(DebugCategory::Proxy, fmt::format("xdg_activation.activate forwarded={}", allow ? 1 : 0));
         if (!allow) {
             *drop = true;
             return true;
@@ -1484,7 +1487,10 @@ void capture_worker_loop(const std::shared_ptr<ConnState> &state) {
     while (!state->stop.load()) {
         // Started lazily: the caller sets the capture backend after launch()
         // returns, i.e. after this loop has already begun.
-        if (!timer_started && state->background_capture.load()) timer_started = reactor.start_timer(100);
+        if (!timer_started && state->background_capture.load()) {
+            timer_started = reactor.start_timer(100);
+            debug_trace(DebugCategory::Capture, "capture worker: timer started");
+        }
 
         std::vector<ReactorEvent> events;
         if (reactor.wait(events, 200) < 0) break;
@@ -1516,6 +1522,7 @@ void Connection::run() {
     ObjectMap map;
     map.link(1, 1);
     state_->connected = true;
+    debug_trace(DebugCategory::Proxy, fmt::format("connection started pid={}", static_cast<long>(state_->owner_pid)));
     std::vector<char> app_pending;
     std::vector<char> upstream_pending;
     std::vector<int> app_pending_fds;
@@ -1561,6 +1568,7 @@ void Connection::run() {
     for (const auto fd : upstream_pending_fds)
         ::close(fd);
     state_->connected = false;
+    debug_trace(DebugCategory::Proxy, fmt::format("connection ended pid={}", static_cast<long>(state_->owner_pid)));
 }
 
 }   // namespace skl::wcas::proxy

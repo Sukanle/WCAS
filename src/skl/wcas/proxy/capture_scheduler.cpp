@@ -1,5 +1,6 @@
 #include "capture_scheduler.h"
 
+#include "debug.h"
 #include "reactor.h"
 
 #include <utility>
@@ -61,6 +62,7 @@ bool CaptureScheduler::on_timer_tick(CaptureJob job, Reactor &reactor) {
         return true;
     }
     // All slots busy: drop this tick (latest-frame policy).
+    debug_trace(DebugCategory::Capture, "capture: all slots busy, tick dropped");
     return false;
 }
 
@@ -80,6 +82,7 @@ int CaptureScheduler::check_timeouts() {
         if (slots_[i].check_timeout()) {
             if (latest_completed_ == i) latest_completed_.reset();
             ++reset_count;
+            debug_trace(DebugCategory::Capture, fmt::format("capture: slot {} timed out and was reset", i));
         }
     }
     return reset_count;

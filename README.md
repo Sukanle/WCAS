@@ -244,7 +244,19 @@ build/Release/wcas-test-7-functions \
 | `--output` | 启动后把窗口移到指定 Hyprland 显示器（如 `DP-2`） |
 | `--key-delay` | 发送 key 前等待秒数（便于手动聚焦） |
 | `--allow-activation` | 放行选中窗口的激活请求，使其接收键盘（会夺取焦点） |
-| `--debug-all` | 打开调试输出 |
+| `--debug-all` | 打开全部调试类别（等价 `WCAS_DEBUG=1`） |
+| `--debug-capture` | 采集/截图调试（调度器丢弃、槽超时） |
+| `--debug-dmabuf` | DMA-BUF 导入/回读诊断（`[wcas:dmabuf]`） |
+| `--debug-harness` | 启动/native 等待/XWayland 回退（`[wcas:harness]`） |
+| `--debug-proxy` | 连接生命周期与消息转发（`[wcas:proxy]`） |
+| `--debug-input` | 注入的指针/键盘输入（`[wcas:input]`） |
+| `--debug-xwayland` | XWayland 桥（`[wcas:xwayland]`） |
+| `--debug-wire` | 逐条 Wayland 消息追踪（`[wcas:wire]`） |
+
+调试类别可用各自的环境变量单独开启：`WCAS_DEBUG_HARNESS` / `WCAS_DEBUG_PROXY` /
+`WCAS_DEBUG_INPUT` / `WCAS_DEBUG_CAPTURE` / `WCAS_DEBUG_DMABUF` /
+`WCAS_DEBUG_XWAYLAND` / `WCAS_DEBUG_WIRE`；`WCAS_DEBUG=1` 打开全部。追踪行格式为
+`[wcas:<类别> t=<单调毫秒>] ...`，时间戳与 `WINEDEBUG` 同源，便于对齐时序。
 
 CLI 模式下的命令：
 

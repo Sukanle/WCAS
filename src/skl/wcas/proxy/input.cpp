@@ -1,5 +1,6 @@
 #include "input.h"
 
+#include "debug.h"
 #include "keymap.h"
 #include "keysym.h"
 
@@ -169,6 +170,7 @@ bool ensure_pointer_focus(const std::shared_ptr<ConnState> &state, std::uint32_t
 
 bool inject_pointer_motion(const std::shared_ptr<ConnState> &state, double sx, double sy) {
     if (!state || !state->pointer_obj) return false;
+    debug_trace(DebugCategory::Input, fmt::format("pointer motion ({:.1f}, {:.1f})", sx, sy));
     std::lock_guard lock(state->data_mutex);
     std::vector<std::uint32_t> msg(5);
     wl_header(msg, state->pointer_obj, 2);   // opcode 2 = motion
@@ -189,6 +191,7 @@ bool inject_relative_motion(const std::shared_ptr<ConnState> &state, double dx, 
         }
     }
     if (!relative_pointer) return false;
+    debug_trace(DebugCategory::Input, fmt::format("relative motion ({:.1f}, {:.1f})", dx, dy));
     // zwp_relative_pointer_v1.relative_motion: utime_hi, utime_lo, dx, dy,
     // dx_unaccel, dy_unaccel (all fixed except the split 64-bit timestamp).
     const std::uint64_t utime = static_cast<std::uint64_t>(input_timestamp_ms()) * 1'000ULL;
@@ -205,6 +208,7 @@ bool inject_relative_motion(const std::shared_ptr<ConnState> &state, double dx, 
 
 bool inject_pointer_button(const std::shared_ptr<ConnState> &state, std::uint32_t button, bool pressed) {
     if (!state || !state->pointer_obj) return false;
+    debug_trace(DebugCategory::Input, fmt::format("pointer button {} pressed={}", button, pressed ? 1 : 0));
     std::lock_guard lock(state->data_mutex);
     std::vector<std::uint32_t> msg(6);
     wl_header(msg, state->pointer_obj, 3);   // opcode 3 = button
@@ -280,6 +284,7 @@ bool ensure_keyboard_focus(const std::shared_ptr<ConnState> &state, std::uint32_
 
 bool inject_key_raw(const std::shared_ptr<ConnState> &state, std::uint32_t xkb_keycode, bool pressed) {
     if (!state || !state->keyboard_obj || !xkb_keycode) return false;
+    debug_trace(DebugCategory::Input, fmt::format("key raw {} pressed={}", xkb_keycode, pressed ? 1 : 0));
     std::lock_guard lock(state->data_mutex);
     std::vector<std::uint32_t> msg(6);
     wl_header(msg, state->keyboard_obj, 3);   // opcode 3 = key
