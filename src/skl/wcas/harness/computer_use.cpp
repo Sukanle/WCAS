@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -34,6 +35,21 @@
 namespace skl::wcas {
 namespace {
 std::error_code code(errc value) { return make_error_code(value); }
+
+/// `WCAS_DEBUG` (set by `--debug-all`) enables launch/connect/fallback tracing.
+/// Used to diagnose why a native Wayland launch sometimes fails and silently
+/// falls back to an empty XWayland window.
+bool launch_trace() {
+    static const bool enabled = std::getenv("WCAS_DEBUG") != nullptr;
+    return enabled;
+}
+
+/// Absolute CLOCK_MONOTONIC milliseconds, to correlate launch events with the
+/// proxy's `WCAS_TRACE_WIRE` timeline and the game's WINEDEBUG timestamps.
+long long launch_now_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
 std::string runtime_directory() {
     const char *v = std::getenv("XDG_RUNTIME_DIR");
     return v ? v : "";
@@ -226,11 +242,17 @@ result<ComputerUse> ComputerUse::create() {
             socklen_t length = sizeof(credentials);
             if (::getsockopt(client, SOL_SOCKET, SO_PEERCRED, &credentials, &length) != 0
                 || credentials.uid != ::getuid()) {
+                if (launch_trace())
+                    std::fprintf(stderr, "[wcas] launch: rejected proxy connection uid=%d (expected %d)\n",
+                        credentials.uid, static_cast<int>(::getuid()));
                 ::close(client);
                 continue;
             }
             const auto upstream = connect_wayland(state->runtime, state->upstream);
             if (upstream < 0) {
+                if (launch_trace())
+                    std::fprintf(
+                        stderr, "[wcas] launch: upstream compositor connect failed for pid=%d\n", credentials.pid);
                 ::close(client);
                 continue;
             }
@@ -238,11 +260,18 @@ result<ComputerUse> ComputerUse::create() {
             session->owner_pid = credentials.pid;
             session->client_fd = client;
             detail::register_session(credentials.pid, session);
+            if (launch_trace())
+                std::fprintf(stderr,
+                    "[wcas] launch [t=%lld]: proxy accepted connection pid=%d client_fd=%d upstream_fd=%d\n",
+                    launch_now_ms(), credentials.pid, client, upstream);
             {
                 std::lock_guard lock(state->connection_mutex);
                 state->connection_states.push_back(session);
                 state->connection_threads.emplace_back([client, upstream, session] {
                     proxy::Connection(client, upstream, session).run();
+                    if (launch_trace())
+                        std::fprintf(stderr, "[wcas] launch [t=%lld]: proxy connection ended pid=%ld client_fd=%d\n",
+                            launch_now_ms(), static_cast<long>(session->owner_pid), client);
                     detail::erase_session(session);
                 });
             }
@@ -324,6 +353,18 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
                 else
                     ::unsetenv(e.first.c_str());
             }
+            if (use_x11) {
+                // Force X11 last: the caller's env may enable Wayland (e.g.
+                // PROTON_ENABLE_WAYLAND=1 from the wrapper) and is applied just
+                // above. Without clearing it the fallback still runs winewayland,
+                // which hits an unimplemented INBV path on some Proton builds
+                // (ntoskrnl.exe.InbvAcquireDisplayOwnership) and aborts the game.
+                ::unsetenv("WAYLAND_DISPLAY");
+                ::unsetenv("PROTON_ENABLE_WAYLAND");
+                ::unsetenv("PROTON_USE_WAYLAND");
+                ::unsetenv("GDK_BACKEND");
+                ::unsetenv("QT_QPA_PLATFORM");
+            }
             std::vector<char *> argv{const_cast<char *>(config.program_.c_str())};
             for (const auto &arg : config.args_)
                 argv.push_back(const_cast<char *>(arg.c_str()));
@@ -358,7 +399,13 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
 
         // Native Wayland: wait for the proxy session to report a capturable surface.
         std::shared_ptr<proxy::ConnState> session;
+        // Whether any proxy session ever connected. A launcher exits after
+        // spawning the game; the game's own connections may come and go while it
+        // boots, so a momentary "no session right now" must not be read as a
+        // spawn failure.
+        bool session_seen = false;
         const auto timeout = impl_->native_timeout;
+        auto last_trace = start_time;
         while (std::chrono::steady_clock::now() - start_time < timeout) {
             // `match_regex` matters here, not just for `list`/`target`: the
             // process that connects to the proxy is `wineserver`, which detaches,
@@ -368,16 +415,54 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
             // though it is connected and capturable, the 30s timeout expires and
             // the whole game gets killed and relaunched over XWayland.
             session = detail::session_for(child, match_regex);
+            if (session && session->connected.load()) session_seen = true;
+            if (launch_trace() && std::chrono::steady_clock::now() - last_trace >= std::chrono::seconds(1)) {
+                last_trace = std::chrono::steady_clock::now();
+                const auto elapsed =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time)
+                        .count();
+                std::fprintf(stderr,
+                    "[wcas] launch: native wait %lldms: session=%s connected=%d capturable=%d commits=%llu "
+                    "presented=%llu\n",
+                    static_cast<long long>(elapsed), session ? "yes" : "no",
+                    session && session->connected.load() ? 1 : 0, session && session->capturable_surface.load() ? 1 : 0,
+                    static_cast<unsigned long long>(session ? session->commit_count.load() : 0),
+                    static_cast<unsigned long long>(session ? session->presented_frames.load() : 0));
+            }
             if (session && session->connected && session->capturable_surface) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 if (session->connected) break;
                 session.reset();
             }
             int status = 0;
-            if (::waitpid(child, &status, WNOHANG) == child) return code(errc::process_spawn_failed);
+            if (::waitpid(child, &status, WNOHANG) == child) {
+                if (launch_trace())
+                    std::fprintf(stderr,
+                        "[wcas] launch [t=%lld]: native child pid=%d exited (status=%d), session=%s connected=%d "
+                        "session_seen=%d\n",
+                        launch_now_ms(), child, WIFEXITED(status) ? WEXITSTATUS(status) : -1, session ? "yes" : "no",
+                        session && session->connected.load() ? 1 : 0, session_seen ? 1 : 0);
+                // A launcher (umu-run / proton.py) exits after spawning the real
+                // game, which keeps running under a descendant. Only fail when no
+                // session ever connected at all; otherwise keep waiting for the
+                // game's capturable surface until timeout, instead of aborting
+                // native early and falling back to an empty XWayland window.
+                if (!session_seen) return code(errc::process_spawn_failed);
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(25));
         }
         if (!session || !session->connected || !session->capturable_surface) {
+            if (launch_trace()) {
+                const auto elapsed =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time)
+                        .count();
+                std::fprintf(stderr,
+                    "[wcas] launch [t=%lld]: native timed out after %lldms (session=%s connected=%d capturable=%d "
+                    "commits=%llu)\n",
+                    launch_now_ms(), static_cast<long long>(elapsed), session ? "yes" : "no",
+                    session && session->connected.load() ? 1 : 0, session && session->capturable_surface.load() ? 1 : 0,
+                    static_cast<unsigned long long>(session ? session->commit_count.load() : 0));
+            }
             detail::terminate_group(child);
             return code(errc::native_wayland_timeout);
         }
@@ -387,21 +472,31 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
         app->session = std::move(session);
         app->transport = Transport::native_wayland;
         app->match_regex = match_regex;
+        if (launch_trace())
+            std::fprintf(stderr, "[wcas] launch [t=%lld]: native session ready (capturable)\n", launch_now_ms());
         return ControlledApp(std::move(app));
     };
 
     // 1) Native Wayland first; fall back to an authenticated XWayland bridge.
     if (auto native = attempt(false, "", "", nullptr); native) return native;
+    if (launch_trace()) std::fprintf(stderr, "[wcas] launch: native Wayland failed, falling back to XWayland bridge\n");
     if (impl_->fallback_timeout.count() <= 0) return code(errc::native_wayland_timeout);
 
     auto bridge = std::make_unique<XwaylandBridge>();
-    if (!bridge->start(impl_->socket_name, 5)) return code(errc::xwayland_bridge_failed);
+    if (!bridge->start(impl_->socket_name, 5)) {
+        if (launch_trace()) std::fprintf(stderr, "[wcas] launch: XWayland bridge start failed\n");
+        return code(errc::xwayland_bridge_failed);
+    }
     // Copy the strings before moving the bridge: argument evaluation order is
     // unspecified, so `bridge->display()` could otherwise run after the move.
     const std::string x11_display = bridge->display();
     const std::string x11_xauthority = bridge->xauthority();
+    if (launch_trace()) std::fprintf(stderr, "[wcas] launch: XWayland bridge display=%s\n", x11_display.c_str());
     auto fallback = attempt(true, x11_display, x11_xauthority, std::move(bridge));
-    if (!fallback) return code(errc::xwayland_bridge_failed);
+    if (!fallback) {
+        if (launch_trace()) std::fprintf(stderr, "[wcas] launch: XWayland fallback failed\n");
+        return code(errc::xwayland_bridge_failed);
+    }
     return fallback;
 }
 
