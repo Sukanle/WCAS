@@ -16,12 +16,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <tuple>
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -86,6 +89,39 @@ Role role_from_interface(const std::string &name) {
 }
 
 namespace {
+
+/// `WCAS_DEBUG` (set by `--debug-all`) enables proxy connection tracing.
+bool conn_trace() {
+    static const bool enabled = std::getenv("WCAS_DEBUG") != nullptr;
+    return enabled;
+}
+
+/// Per-message wire summary for timing analysis (`WCAS_TRACE_WIRE=1`, or a file
+/// path to append to). Kept compact (monotonic timestamp, direction, interface,
+/// object id, opcode, byte length) and buffered so it perturbs the proxy timing
+/// as little as possible; message bodies are never dumped. Used to compare a
+/// working (direct) run against a failing (proxy) run to find where the timing
+/// diverges.
+void wire_trace(
+    bool app_to_upstream, const std::string &role, std::uint32_t object, std::uint32_t opcode, std::size_t size) {
+    static const char *spec = std::getenv("WCAS_TRACE_WIRE");
+    if (spec == nullptr) return;
+    static std::mutex mutex;
+    static FILE *file = []() -> FILE * {
+        if (spec[0] != '\0' && std::strcmp(spec, "1") != 0) return std::fopen(spec, "a");
+        return stderr;
+    }();
+    if (file == nullptr) return;
+    // Absolute CLOCK_MONOTONIC milliseconds (steady_clock's epoch is boot on
+    // Linux), so this correlates with the harness's own timestamps and the
+    // game's WINEDEBUG timestamps within the same boot.
+    const auto ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    std::lock_guard lock(mutex);
+    std::fprintf(file, "%lld %s %s obj=%u op=%u len=%zu\n", static_cast<long long>(ms),
+        app_to_upstream ? "app->up" : "up->app", role.empty() ? "?" : role.c_str(), object, opcode, size);
+}
 
 std::uint32_t word(const char *p) {
     std::uint32_t v;
@@ -404,6 +440,7 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
     const auto role_it = state.object_roles.find(role_id);
     const std::string role =
         role_it == state.object_roles.end() ? (original_sender == 1 ? "wl_display" : "") : role_it->second;
+    wire_trace(app_to_upstream, role, role_id, opcode, msg.size());
 
     // `xdg_activation_v1.activate` (opcode 2) lets the app ask the compositor to
     // focus its window. A synthetic click injected by wcas reaches the app,
@@ -426,6 +463,8 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
         std::size_t next = 0;
         const auto name = wire_string(msg, 12, &next);
         if (is_denied_global(name) || !is_allowed_global(name)) {
+            if (conn_trace())
+                std::fprintf(stderr, "[wcas] proxy: filtered global '%s' (not exposed to app)\n", name.c_str());
             *drop = true;
             return true;
         }
@@ -998,7 +1037,12 @@ bool transfer(int from, int to, bool app_to_upstream, ObjectMap &map, const std:
     in.msg_control = control.data();
     in.msg_controllen = control.size();
     const auto n = ::recvmsg(from, &in, 0);
-    if (n <= 0) return false;
+    if (n <= 0) {
+        if (conn_trace())
+            std::fprintf(stderr, "[wcas] proxy: recvmsg(%s) returned %zd (%s)\n", app_to_upstream ? "app" : "upstream",
+                static_cast<ssize_t>(n), n == 0 ? "peer closed" : std::strerror(errno));
+        return false;
+    }
     std::vector<int> received_fds;
     for (auto *c = CMSG_FIRSTHDR(&in); c; c = CMSG_NXTHDR(&in, c)) {
         if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
@@ -1012,19 +1056,31 @@ bool transfer(int from, int to, bool app_to_upstream, ObjectMap &map, const std:
     while (pending.size() >= 8) {
         const auto header = word(pending.data() + 4);
         const auto message_size = static_cast<std::uint16_t>(header >> 16);
-        if (message_size < 8 || (message_size & 3u) != 0 || message_size > 1u << 16) return false;
+        if (message_size < 8 || (message_size & 3u) != 0 || message_size > 1u << 16) {
+            if (conn_trace())
+                std::fprintf(stderr, "[wcas] proxy: malformed message size %u (app_to_upstream=%d)\n", message_size,
+                    app_to_upstream ? 1 : 0);
+            return false;
+        }
         if (pending.size() < message_size) break;
         std::vector<char> message(pending.begin(), pending.begin() + message_size);
         pending.erase(pending.begin(), pending.begin() + message_size);
         bool drop = false;
         std::size_t fd_index = 0;
         if (!rewrite(message, app_to_upstream, map, *state, pending_fds, &fd_index, &drop)
-            || (fd_index > pending_fds.size()))
+            || (fd_index > pending_fds.size())) {
+            if (conn_trace())
+                std::fprintf(stderr, "[wcas] proxy: rewrite failed (app_to_upstream=%d, object=%u opcode=%u)\n",
+                    app_to_upstream ? 1 : 0, word(message.data()), word(message.data() + 4) & 0xffffu);
             return false;
+        }
 
         std::vector<int> message_fds(pending_fds.begin(), pending_fds.begin() + fd_index);
         pending_fds.erase(pending_fds.begin(), pending_fds.begin() + fd_index);
         if (drop) {
+            if (conn_trace())
+                std::fprintf(stderr, "[wcas] proxy: dropped message (app_to_upstream=%d object=%u opcode=%u)\n",
+                    app_to_upstream ? 1 : 0, word(message.data()), word(message.data() + 4) & 0xffffu);
             for (const auto fd : message_fds)
                 ::close(fd);
             continue;
@@ -1047,7 +1103,13 @@ bool transfer(int from, int to, bool app_to_upstream, ObjectMap &map, const std:
         const auto sent = ::sendmsg(to, &out, MSG_NOSIGNAL);
         for (const auto fd : message_fds)
             ::close(fd);
-        if (sent != static_cast<ssize_t>(message.size())) return false;
+        if (sent != static_cast<ssize_t>(message.size())) {
+            if (conn_trace())
+                std::fprintf(stderr, "[wcas] proxy: sendmsg(%s) failed (sent=%zd want=%zu, %s)\n",
+                    app_to_upstream ? "upstream" : "app", static_cast<ssize_t>(sent), message.size(),
+                    std::strerror(errno));
+            return false;
+        }
     }
     return true;
 }
@@ -1470,6 +1532,45 @@ std::optional<CaptureJob> make_capture_job(const std::shared_ptr<ConnState> &sta
     return job;
 }
 
+/// Runs the background capture pipeline (periodic timer + slot scheduler + GPU
+/// import/copy/readback) on its own thread with its own reactor. The Wayland
+/// forwarding loop must never block on a GPU import/readback: during heavy GPU
+/// work (e.g. a game loading) those stall frame callbacks (`wl_callback.done`)
+/// and buffer releases, freezing the app on its last presented frame.
+void capture_worker_loop(const std::shared_ptr<ConnState> &state) {
+    Reactor reactor;
+    CaptureScheduler scheduler;
+    if (!reactor.valid()) return;
+    bool timer_started = false;
+    while (!state->stop.load()) {
+        // Started lazily: the caller sets the capture backend after launch()
+        // returns, i.e. after this loop has already begun.
+        if (!timer_started && state->background_capture.load()) timer_started = reactor.start_timer(100);
+
+        std::vector<ReactorEvent> events;
+        if (reactor.wait(events, 200) < 0) break;
+
+        bool capture_timer = false;
+        std::vector<int> sync_slots;
+        for (const auto &event : events) {
+            if (event.key == key_capture_timer)
+                capture_timer = true;
+            else if (event.key >= key_sync_file_base && event.key < key_sync_file_base + 16)
+                sync_slots.push_back(static_cast<int>(event.key - key_sync_file_base));
+        }
+        if (capture_timer && scheduler.valid() && scheduler.has_free_slot()) {
+            if (auto job = make_capture_job(state)) scheduler.on_timer_tick(std::move(*job), reactor);
+        }
+        for (const int slot : sync_slots)
+            scheduler.on_sync_ready(slot);
+        scheduler.check_timeouts();
+        if (auto snapshot = scheduler.take_latest_snapshot()) {
+            std::lock_guard lock(state->data_mutex);
+            state->pre_captured_frame = std::move(*snapshot);
+        }
+    }
+}
+
 }   // namespace
 
 void Connection::run() {
@@ -1482,58 +1583,48 @@ void Connection::run() {
     std::vector<int> upstream_pending_fds;
 
     Reactor reactor;
-    CaptureScheduler scheduler;
     if (reactor.valid()) {
         reactor.add_fd(key_server, app_fd_);
         reactor.add_fd(key_upstream, upstream_fd_);
     }
-    // The background slot scheduler is started lazily: the caller sets the
-    // capture backend only after launch() returns, which is already after this
-    // loop began, so a one-shot check at startup would never observe it.
-    bool capture_timer_started = false;
+
+    // The capture pipeline runs on its own thread with its own reactor, so this
+    // forwarding loop is never blocked by a slow GPU import/readback (which would
+    // stall the app's frame callbacks and buffer releases).
+    std::thread capture_thread([state = state_] { capture_worker_loop(state); });
 
     while (true) {
         if (state_->stop.load()) break;
-        if (!capture_timer_started && reactor.valid() && state_->background_capture.load())
-            capture_timer_started = reactor.start_timer(100);
         std::vector<ReactorEvent> events;
         if (reactor.wait(events, 200) < 0) break;
 
         bool server_ready = false;
         bool upstream_ready = false;
-        bool capture_timer = false;
-        std::vector<int> sync_slots;
         for (const auto &event : events) {
-            if (event.key == key_server) {
+            if (event.key == key_server)
                 server_ready = true;
-            } else if (event.key == key_upstream) {
+            else if (event.key == key_upstream)
                 upstream_ready = true;
-            } else if (event.key == key_capture_timer) {
-                capture_timer = true;
-            } else if (event.key >= key_sync_file_base && event.key < key_sync_file_base + 16) {
-                sync_slots.push_back(static_cast<int>(event.key - key_sync_file_base));
-            }
         }
 
-        if (capture_timer && scheduler.valid() && scheduler.has_free_slot()) {
-            if (auto job = make_capture_job(state_)) {
-                scheduler.on_timer_tick(std::move(*job), reactor);
-            }
-        }
-        for (const int slot : sync_slots)
-            scheduler.on_sync_ready(slot);
-
-        if (server_ready && !transfer(app_fd_, upstream_fd_, true, map, state_, app_pending, app_pending_fds)) break;
-        if (upstream_ready
-            && !transfer(upstream_fd_, app_fd_, false, map, state_, upstream_pending, upstream_pending_fds))
+        if (server_ready && !transfer(app_fd_, upstream_fd_, true, map, state_, app_pending, app_pending_fds)) {
+            if (conn_trace())
+                std::fprintf(
+                    stderr, "[wcas] proxy: app->upstream transfer failed, ending connection (app_fd=%d)\n", app_fd_);
             break;
-
-        scheduler.check_timeouts();
-        if (auto snapshot = scheduler.take_latest_snapshot()) {
-            std::lock_guard lock(state_->data_mutex);
-            state_->pre_captured_frame = std::move(*snapshot);
+        }
+        if (upstream_ready
+            && !transfer(upstream_fd_, app_fd_, false, map, state_, upstream_pending, upstream_pending_fds)) {
+            if (conn_trace())
+                std::fprintf(stderr,
+                    "[wcas] proxy: upstream->app transfer failed, ending connection (upstream_fd=%d)\n", upstream_fd_);
+            break;
         }
     }
+
+    // Stop the capture worker and join it before tearing down the state it reads.
+    state_->stop = true;
+    if (capture_thread.joinable()) capture_thread.join();
 
     for (const auto fd : app_pending_fds)
         ::close(fd);

@@ -109,7 +109,8 @@ WCAS 分阶段推进，每一阶段都要有对应测试通过后才算完成：
 - **协议感知代理** —— 翻译 core Wayland 与 47 个扩展协议接口，处理 `new_id`、
   `SCM_RIGHTS` FD 转发、双向对象 ID 映射、registry allowlist/denylist
 - **截图** —— `wl_shm`（mmap ARGB/XRGB）；DMA-BUF 按能力选后端（Vulkan 导入 / EGL+GBM 导入 /
-  线性 mmap），无法解码时窗口对齐回退到合成器截图（见 [docs/CAPTURE.md](docs/CAPTURE.md)）
+  线性 mmap），无法解码时窗口对齐回退到合成器截图（见 [docs/CAPTURE.md](docs/CAPTURE.md)）；
+  后台采集在独立线程运行，不阻塞 Wayland 消息转发
 - **输入注入** —— keymap（xkbcommon）解析按键/修饰键、Unicode 文本（优先 text-input-v3）、
   pointer / scroll / drag、长按、长按滑动、二维拖动（旋转视角/相机）；指针锁定游戏经
   `zwp_relative_pointer_v1` 注入相对位移
@@ -128,7 +129,6 @@ WCAS 分阶段推进，每一阶段都要有对应测试通过后才算完成：
 | Cocoa 后端 | 计划中，未开始 |
 | 多平面 / YUV DMA-BUF | `capture_dmabuf` 目前只支持单平面 RGB |
 | KMS 抓取 | 已作为合成器回退接入（需 libdrmtap 与 `CAP_SYS_ADMIN`）；改为直接 DRM/KMS ioctl 暂缓 |
-| 后台三槽调度 | `capture_slot` / `capture_scheduler` 已实现但未接线到 `launch()` 流程 |
 | XWayland 完整回退 | `content_timeout` 未接入 capture，X11-only 客户端端到端未验证 |
 | 负向协议测试 | 未知 opcode / 版本越界 / 畸形签名 |
 
