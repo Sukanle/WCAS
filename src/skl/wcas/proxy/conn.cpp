@@ -1486,14 +1486,16 @@ void Connection::run() {
     if (reactor.valid()) {
         reactor.add_fd(key_server, app_fd_);
         reactor.add_fd(key_upstream, upstream_fd_);
-        // A periodic tick drives the background slot scheduler when the caller
-        // asked for DMA-BUF capture; capture() then reads the latest completed
-        // snapshot instead of blocking on I/O.
-        if (state_->background_capture.load()) reactor.start_timer(100);
     }
+    // The background slot scheduler is started lazily: the caller sets the
+    // capture backend only after launch() returns, which is already after this
+    // loop began, so a one-shot check at startup would never observe it.
+    bool capture_timer_started = false;
 
     while (true) {
         if (state_->stop.load()) break;
+        if (!capture_timer_started && reactor.valid() && state_->background_capture.load())
+            capture_timer_started = reactor.start_timer(100);
         std::vector<ReactorEvent> events;
         if (reactor.wait(events, 200) < 0) break;
 
