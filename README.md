@@ -94,6 +94,9 @@ WCAS 分阶段推进，每一阶段都要有对应测试通过后才算完成：
 | 6    | CLI 与脚本：全部参数、窗口管理、长按/滑动、显示器、诊断                                                      | 进行中                              |
 | 7    | Interface 化：Controller/Capture/DMA-BUF/Frame/Window/Transport/Launch 契约与 provider                       | 冻结（约 90%）                      |
 
+完整的阶段状态、测试矩阵与历史关键修复见 [docs/STATUS.md](docs/STATUS.md)；与 Rust 参考实现的
+决策对照见 [docs/REFERENCE.md](docs/REFERENCE.md)。
+
 关键技术决策：
 
 - **wire 元数据在构建期生成。** libwayland 的 `wl_interface` 是客户端接口表（`release`/
@@ -463,8 +466,8 @@ src/skl/wcas/
 third_party/ABIX/     Interface 契约与 proxy 实现（头文件）
 codegen/              由协议 XML 生成 wire 元数据（构建期执行）
 tests/                单元测试与协议集成测试（fake Wayland 环境）
-docs/                 项目文档（INTERFACE / CAPTURE / COMPATIBILITY / CONTROLLER /
-                      FRAMES / MAA-COMPARISON / Proton / SECURITY）
+docs/                 项目文档（INTERFACE / STATUS / REFERENCE / CAPTURE / COMPATIBILITY /
+                      CONTROLLER / FRAMES / MAA-COMPARISON / Proton / SECURITY）
 proton-inject*.sh     Proton / Lutris 启动包装
 ```
 
