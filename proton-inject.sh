@@ -348,11 +348,11 @@ if [[ "${UMU_MODE}" == "yes" ]]; then
     fi
 fi
 
-if [[ -f "${PROJECT_DIR}/build/Release/wcas-test-7-functions" ]]; then
-    TEST_BINARY="${PROJECT_DIR}/build/Release/wcas-test-7-functions"
+if [[ -f "${PROJECT_DIR}/build/Release/proton-inject" ]]; then
+    TEST_BINARY="${PROJECT_DIR}/build/Release/proton-inject"
     log "[OK] 找到 Release 测试二进制: ${TEST_BINARY}"
-elif [[ -f "${PROJECT_DIR}/build/Debug/wcas-test-7-functions" ]]; then
-    TEST_BINARY="${PROJECT_DIR}/build/Debug/wcas-test-7-functions"
+elif [[ -f "${PROJECT_DIR}/build/Debug/proton-inject" ]]; then
+    TEST_BINARY="${PROJECT_DIR}/build/Debug/proton-inject"
     log "[OK] 找到 Debug 测试二进制: ${TEST_BINARY}"
 else
     log "[INFO] 未找到测试二进制，尝试编译..."
@@ -360,7 +360,7 @@ else
         cd "${PROJECT_DIR}"
         cmake -B build/Release -DCMAKE_BUILD_TYPE=Release -S . -G "Ninja" -DDRMTAP_HELPER=OFF -DDRMTAP_EGL=AUTO
         cmake --build build/Release --parallel
-        TEST_BINARY="${PROJECT_DIR}/build/Release/wcas-test-7-functions"
+        TEST_BINARY="${PROJECT_DIR}/build/Release/proton-inject"
         if [[ ! -f "${TEST_BINARY}" ]]; then
             log "[ERROR] 编译失败"
             exit 1

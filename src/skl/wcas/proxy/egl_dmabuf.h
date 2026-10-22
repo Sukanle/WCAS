@@ -1,4 +1,5 @@
 #pragma once
+#include "skl/wcas/types.h"
 
 #include <cstdint>
 #include <optional>
@@ -26,7 +27,7 @@ bool egl_dmabuf_import_supported(std::uint32_t fourcc, std::uint64_t modifier);
 /// Returns `nullopt` when EGL is unavailable, rejects the modifier, or the
 /// framebuffer read fails. A successful return only means EGL produced bytes;
 /// callers must still interpret them with the source format's channel order.
-std::optional<std::vector<std::uint8_t>> egl_read_dmabuf(int fd, std::uint32_t width, std::uint32_t height,
+optional<std::vector<std::uint8_t>> egl_read_dmabuf(int fd, std::uint32_t width, std::uint32_t height,
     std::uint32_t stride, std::uint64_t modifier, std::uint32_t fourcc, std::uint32_t offset);
 
 }   // namespace skl::wcas::proxy

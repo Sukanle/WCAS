@@ -39,14 +39,14 @@ public:
     /// Reset slots stuck in WaitingProducer/Submitted. Returns the count.
     int check_timeouts();
     /// Take the most recently completed snapshot, freeing its slot.
-    std::optional<cv::Mat> take_latest_snapshot();
+    optional<cv::Mat> take_latest_snapshot();
 
     [[nodiscard]] std::uint64_t total_captures() const { return total_captures_; }
     [[nodiscard]] std::uint64_t total_completed() const { return total_completed_; }
 
 private:
     std::vector<CaptureSlot> slots_;
-    std::optional<int> latest_completed_;
+    optional<int> latest_completed_;
     std::uint64_t total_captures_ = 0;
     std::uint64_t total_completed_ = 0;
 };

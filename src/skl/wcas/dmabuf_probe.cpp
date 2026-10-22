@@ -78,7 +78,7 @@ std::string ProbeResults::report() const {
         fmt::format_to(fmt::appender(out),
             "  {} {}: {}\n"
             "     耗时: {}µs\n",
-            result.passed ? "✅" : "❌", result.name, result.detail, result.elapsed.count());
+            result.passed ? "✔" : "✘", result.name, result.detail, result.elapsed.count());
         if (result.passed) ++passed;
     }
 

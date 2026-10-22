@@ -1,4 +1,5 @@
 #pragma once
+#include "skl/wcas/types.h"
 
 #include <cstdint>
 #include <optional>
@@ -11,6 +12,6 @@ namespace skl::wcas::proxy {
 ///  map to the X11 keysym range, and `F1..F24` map to `0xffbe + n - 1`.
 /// Unknown names return `std::nullopt` so callers fail loudly instead
 /// of guessing a keycode.
-std::optional<std::uint32_t> keysym_for_key(const std::string &name);
+optional<std::uint32_t> keysym_for_key(const std::string &name);
 
 }   // namespace skl::wcas::proxy

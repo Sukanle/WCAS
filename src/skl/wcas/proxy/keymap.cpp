@@ -62,7 +62,7 @@ std::vector<std::uint32_t> Keymap::key_syms(std::uint32_t keycode, std::uint32_t
     return symbols;
 }
 
-std::optional<Keymap::CharResolution> Keymap::resolve_char(std::uint32_t codepoint) const {
+optional<Keymap::CharResolution> Keymap::resolve_char(std::uint32_t codepoint) const {
     if (!keymap_) return std::nullopt;
     const auto target = keysym_for_codepoint(codepoint);
     if (!target) return std::nullopt;
@@ -77,7 +77,7 @@ std::optional<Keymap::CharResolution> Keymap::resolve_char(std::uint32_t codepoi
     return std::nullopt;
 }
 
-std::optional<std::uint32_t> Keymap::find_keysym(std::uint32_t keysym) const {
+optional<std::uint32_t> Keymap::find_keysym(std::uint32_t keysym) const {
     if (!keymap_) return std::nullopt;
     for (auto keycode = min_keycode(); keycode <= max_keycode(); ++keycode) {
         for (const auto symbol : key_syms(keycode, 0, 0)) {
@@ -90,14 +90,14 @@ std::optional<std::uint32_t> Keymap::find_keysym(std::uint32_t keysym) const {
     return std::nullopt;
 }
 
-std::optional<std::uint32_t> Keymap::shift_keycode() const { return find_keysym(XKB_KEY_Shift_L); }
+optional<std::uint32_t> Keymap::shift_keycode() const { return find_keysym(XKB_KEY_Shift_L); }
 
 std::uint32_t Keymap::shift_mask() const {
     const auto index = modifier_mask("Shift");
     return index ? *index : 1u;
 }
 
-std::optional<std::uint32_t> Keymap::modifier_mask(const char *name) const {
+optional<std::uint32_t> Keymap::modifier_mask(const char *name) const {
     if (!keymap_ || !name) return std::nullopt;
     const auto index = xkb_keymap_mod_get_index(keymap_.get(), name);
     if (index == XKB_MOD_INVALID) return std::nullopt;
@@ -105,7 +105,7 @@ std::optional<std::uint32_t> Keymap::modifier_mask(const char *name) const {
     return 1u << index;
 }
 
-std::optional<std::string> read_keymap_text(const ConnState &state) {
+optional<std::string> read_keymap_text(const ConnState &state) {
     if (state.keymap_fd < 0 || state.keymap_size == 0) return std::nullopt;
     // MAP_PRIVATE: the keymap memfd is owned by the app and may be sealed;
     // the mapping is read-only and never written back.

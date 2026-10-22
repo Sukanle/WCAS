@@ -88,7 +88,7 @@ int CaptureScheduler::check_timeouts() {
     return reset_count;
 }
 
-std::optional<cv::Mat> CaptureScheduler::take_latest_snapshot() {
+optional<cv::Mat> CaptureScheduler::take_latest_snapshot() {
     if (!latest_completed_.has_value()) return std::nullopt;
     auto result = slots_[*latest_completed_].take_result();
     if (result.has_value()) latest_completed_.reset();

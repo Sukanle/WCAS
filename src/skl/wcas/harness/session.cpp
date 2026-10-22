@@ -20,7 +20,7 @@
 namespace skl::wcas::detail {
 namespace {
 
-std::optional<pid_t> parent_pid(pid_t pid) {
+optional<pid_t> parent_pid(pid_t pid) {
     std::ifstream file("/proc/" + std::to_string(pid) + "/stat");
     std::string line;
     if (!file || !std::getline(file, line)) return std::nullopt;
@@ -29,7 +29,7 @@ std::optional<pid_t> parent_pid(pid_t pid) {
     std::istringstream fields(line.substr(close + 2));
     char state = 0;
     pid_t parent = -1;
-    return (fields >> state >> parent) ? std::optional<pid_t>(parent) : std::nullopt;
+    return (fields >> state >> parent) ? optional<pid_t>(parent) : std::nullopt;
 }
 
 /// True when `pid` has `ancestor` somewhere up its parent chain.
@@ -68,7 +68,7 @@ std::string process_text(pid_t pid) {
 }
 
 /// Compile `match_regex`, or nothing when it is empty or invalid.
-std::optional<std::regex> compile_pattern(const std::string &match_regex) {
+optional<std::regex> compile_pattern(const std::string &match_regex) {
     if (match_regex.empty()) return std::nullopt;
     try {
         return std::regex(match_regex);
@@ -88,7 +88,7 @@ std::uint64_t next_session_id = 1;
 /// line matches. The second test is what keeps a detached `wineserver` matched
 /// after its ancestors have exited and it has been re-parented to init.
 bool session_belongs_to(
-    const std::shared_ptr<proxy::ConnState> &state, pid_t pid, const std::optional<std::regex> &pattern) {
+    const std::shared_ptr<proxy::ConnState> &state, pid_t pid, const optional<std::regex> &pattern) {
     if (state->owner_pid <= 0) return false;
     const auto owner = static_cast<pid_t>(state->owner_pid);
     if (owner == pid || descendant(owner, pid)) return true;

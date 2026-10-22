@@ -1,4 +1,5 @@
 #pragma once
+#include "skl/wcas/types.h"
 
 #include "conn.h"
 
@@ -49,20 +50,20 @@ public:
         std::uint32_t keycode = 0;
         bool needs_shift = false;
     };
-    [[nodiscard]] std::optional<CharResolution> resolve_char(std::uint32_t codepoint) const;
+    [[nodiscard]] optional<CharResolution> resolve_char(std::uint32_t codepoint) const;
 
     /// Keycode for the left Shift key, if the layout defines one.
-    [[nodiscard]] std::optional<std::uint32_t> shift_keycode() const;
+    [[nodiscard]] optional<std::uint32_t> shift_keycode() const;
 
     /// Mask to OR into `wl_keyboard.modifiers.depressed` while Shift is held.
     [[nodiscard]] std::uint32_t shift_mask() const;
 
     /// Keycode producing `keysym` at either level, if any.
-    [[nodiscard]] std::optional<std::uint32_t> find_keysym(std::uint32_t keysym) const;
+    [[nodiscard]] optional<std::uint32_t> find_keysym(std::uint32_t keysym) const;
 
     /// Modifier mask for an xkb modifier name ("Shift", "Control", "Mod1",
     /// "Mod4"). Returns std::nullopt when the layout does not define it.
-    [[nodiscard]] std::optional<std::uint32_t> modifier_mask(const char *name) const;
+    [[nodiscard]] optional<std::uint32_t> modifier_mask(const char *name) const;
 
 private:
     struct ContextDeleter {
@@ -88,6 +89,6 @@ private:
 /// Read the keymap text captured from `wl_keyboard.keymap`. Returns
 /// std::nullopt when no keymap has been captured yet or when the mapping
 /// cannot be established.
-std::optional<std::string> read_keymap_text(const ConnState &state);
+optional<std::string> read_keymap_text(const ConnState &state);
 
 }   // namespace skl::wcas::proxy

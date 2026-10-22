@@ -339,7 +339,7 @@ KeyCombination parse_key_combination(const std::string &combination) {
     return parsed;
 }
 
-std::optional<const char *> xkb_modifier_name(const std::string &name) {
+optional<const char *> xkb_modifier_name(const std::string &name) {
     const auto key = lowered(name);
     if (key == "shift") return "Shift";
     if (key == "ctrl" || key == "control") return "Control";
