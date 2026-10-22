@@ -6,9 +6,11 @@ description: Define consistent Git commit message conventions for the project. U
 # Git Commit Style
 
 ## Objective
+
 Keep Git history readable, searchable, and consistent across all contributors and AI assistants.
 
 ## Global Constraints
+
 Apply these constraints while using this skill.
 
 1. Follow the established commit conventions; do not introduce alternative styles.
@@ -18,11 +20,13 @@ Apply these constraints while using this skill.
 ## Commit Message Format
 
 Full format:
+
 ```
 <type>(<scope>): <short description> — <detailed body>
 ```
 
 Simplified format for trivial changes:
+
 ```
 <type>(<scope>): <short description>
 ```
@@ -31,14 +35,14 @@ Simplified format for trivial changes:
 
 Use lowercase English types, compatible with Conventional Commits.
 
-| Type | Meaning | Example |
-|------|---------|---------|
-| `feat` | New feature | `feat: ScriptCardPainter 动态布局引擎` |
-| `refactor` | Code refactoring (no bug fix, no feature) | `refactor: ElaMultiComboBox Fluent UI` |
-| `fix` | Bug fix | `fix(ElaAppBar): 修复 WM_GETMINMAXINFO 多屏 DPI 缩放错误` |
-| `docs` | Documentation changes | `docs: 项目文档 + Memory Bank + Agent Skills` |
-| `chore` | Miscellaneous (build, tooling, deps) | `chore(ElaWidgetTools): 移除冗余的 Q_SIGNAL 与 virtual 修饰符` |
-| `revert` | Revert a previous commit | Generated automatically by `git revert` |
+| Type       | Meaning                                   | Example                                                        |
+| ---------- | ----------------------------------------- | -------------------------------------------------------------- |
+| `feat`     | New feature                               | `feat: ScriptCardPainter 动态布局引擎`                         |
+| `refactor` | Code refactoring (no bug fix, no feature) | `refactor: ElaMultiComboBox Fluent UI`                         |
+| `fix`      | Bug fix                                   | `fix(ElaAppBar): 修复 WM_GETMINMAXINFO 多屏 DPI 缩放错误`      |
+| `docs`     | Documentation changes                     | `docs: 项目文档 + Memory Bank + Agent Skills`                  |
+| `chore`    | Miscellaneous (build, tooling, deps)      | `chore(ElaWidgetTools): 移除冗余的 Q_SIGNAL 与 virtual 修饰符` |
+| `revert`   | Revert a previous commit                  | Generated automatically by `git revert`                        |
 
 ## Scope (optional)
 
@@ -54,11 +58,11 @@ Use lowercase English types, compatible with Conventional Commits.
 
 ## Style Rules
 
-- ❌ Do not use emojis (✨ ♻ 📝 etc.)
-- ✅ Use English type names (e.g., `refactor`), never Chinese equivalents
-- ✅ Write the short description and body in Simplified Chinese
-- ✅ A single space must follow the colon `:` that separates the type/scope and the description
-- ✅ Use bullet points (`-`) for each change point in the body
+- ✘ Do not use emojis (✨ ♻ 📝 etc.)
+- ✔ Use English type names (e.g., `refactor`), never Chinese equivalents
+- ✔ Write the short description and body in Simplified Chinese
+- ✔ A single space must follow the colon `:` that separates the type/scope and the description
+- ✔ Use bullet points (`-`) for each change point in the body
 
 ## Examples
 
@@ -102,4 +106,4 @@ fix(ElaAppBar): 修复 WM_GETMINMAXINFO 多屏 DPI 缩放错误
 
 ---
 
-*This specification is derived from the project’s recent commit history and applies to all contributors and AI coding assistants.*
+_This specification is derived from the project’s recent commit history and applies to all contributors and AI coding assistants._

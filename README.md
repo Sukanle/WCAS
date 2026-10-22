@@ -7,6 +7,10 @@
 
 > **状态：早期实验性。** 尚未发布 API，允许破坏性变更。Wayland 核心链路已可用，
 > KMS、XWayland 完整回退、后台截图调度等仍在补全。
+>
+> **Interface 迁移：2026-10-22 暂时冻结（约 90%）。** Controller、Capture、DMA-BUF、
+> FrameSink、Window、Transport、Launch 等后端已按 ABIX Interface 组合；剩余项见
+> [docs/INTERFACE.md](docs/INTERFACE.md)。
 
 ---
 
@@ -35,13 +39,15 @@ WCAS 的做法是**换一个信任边界**：不去对抗 Wayland 的安全模�
 
 ### 理论模型
 
-```
-应用 ──(WAYLAND_DISPLAY)──▶ 私有代理 ──(wl_display)──▶ 真实合成器
-                               │
-                               ├─ 双向对象 ID 空间（app ⇄ upstream）
-                               ├─ 参数/FD(new_id, SCM_RIGHTS) 翻译
-                               ├─ surface / buffer / toplevel 观察
-                               └─ 截图与输入注入的注入点
+```mermaid
+flowchart LR
+    A["应用"] -->|WAYLAND_DISPLAY| B["私有代理"]
+    B -->|wl_display| C["真实合成器"]
+
+    B --- B1["双向对象 ID 空间（app ⇄ upstream）"]
+    B --- B2["参数/FD(new_id, SCM_RIGHTS) 翻译"]
+    B --- B3["surface / buffer / toplevel 观察"]
+    B --- B4["截图与输入注入的注入点"]
 ```
 
 代理为每条应用连接建立一条独立的 upstream 连接。`new_id` 在 upstream 侧使用**恒等映射**，
@@ -57,35 +63,36 @@ WCAS 启动一个目标应用，并在它与合成器之间插入私有 Wayland 
 - **枚举与切换窗口** —— 一个应用的多进程、多 surface 窗口均可列出并指定目标
 - **跟踪几何与光标** —— frame 像素与 surface 逻辑像素之间的正确换算
 
-| 方案 | 截图范围 | 需要 X11 | 需要改动被控应用 |
-| --- | --- | --- | --- |
-| grim / spectacle / gnome-screenshot | 整屏或单窗口（依赖合成器工具） | 否 | 否 |
-| X11 + XComposite | 单窗口 | **是** | 否 |
-| **WCAS** | **被启动应用的窗口** | 否（XWayland 仅作回退） | 否，但**必须由 WCAS 启动** |
+| 方案                                | 截图范围                       | 需要 X11                | 需要改动被控应用           |
+| ----------------------------------- | ------------------------------ | ----------------------- | -------------------------- |
+| grim / spectacle / gnome-screenshot | 整屏或单窗口（依赖合成器工具） | 否                      | 否                         |
+| X11 + XComposite                    | 单窗口                         | **是**                  | 否                         |
+| **WCAS**                            | **被启动应用的窗口**           | 否（XWayland 仅作回退） | 否，但**必须由 WCAS 启动** |
 
 典型场景：让自动化 agent 启动一个游戏或 GUI，看清它的画面，再把操作打回它的窗口里。
 
 ### 适配的游戏
 
-| 状态 | 游戏 |
-| --- | --- |
-| 已适配 | 明日方舟、明日方舟：终末地 |
-| 计划适配 | 鸣潮、异环、绝区零 |
+| 状态     | 游戏                       |
+| -------- | -------------------------- |
+| 已适配   | 明日方舟、明日方舟：终末地 |
+| 计划适配 | 鸣潮、异环、绝区零         |
 
 ## 三、技术路线
 
 WCAS 分阶段推进，每一阶段都要有对应测试通过后才算完成：
 
-| 阶段 | 内容 | 状态 |
-| --- | --- | --- |
-| 1 | 协议感知代理：registry 过滤、对象映射、参数/FD 翻译、surface/commit 观察 | 完成 |
-| 2 | `wl_shm` 捕获：pool/buffer 生命周期、mmap 解码、目标选择、retained frame | 完成 |
-| 2b | wire 元数据重建：由协议 XML 生成完整 opcode/签名/`new_id` 目标表 | 完成 |
-| 3 | 输入：keymap、xkbcommon 布局、修饰键、Unicode、text-input-v3、指针/滚轮/拖拽 | 完成 |
-| 4 | DMA-BUF 与 GPU 捕获：Vulkan / EGL+GBM 导入、按能力选后端、线性回退、合成器回退、reactor + 三槽调度、窗口几何 | 大部分完成 |
-| 4b | KMS：直接 DRM/KMS ioctl（去掉外部 helper 依赖） | **暂缓** |
-| 5 | XWayland：独立 Xwayland bridge、native 失败回退、XComposite 捕获 | 部分完成 |
-| 6 | CLI 与脚本：全部参数、窗口管理、长按/滑动、显示器、诊断 | 进行中 |
+| 阶段 | 内容                                                                                                         | 状态                                |
+| ---- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| 1    | 协议感知代理：registry 过滤、对象映射、参数/FD 翻译、surface/commit 观察                                     | 完成                                |
+| 2    | `wl_shm` 捕获：pool/buffer 生命周期、mmap 解码、目标选择、retained frame                                     | 完成                                |
+| 2b   | wire 元数据重建：由协议 XML 生成完整 opcode/签名/`new_id` 目标表                                             | 完成                                |
+| 3    | 输入：keymap、xkbcommon 布局、修饰键、Unicode、text-input-v3、指针/滚轮/拖拽                                 | 完成                                |
+| 4    | DMA-BUF 与 GPU 捕获：Vulkan / EGL+GBM 导入、按能力选后端、线性回退、合成器回退、reactor + 三槽调度、窗口几何 | 大部分完成                          |
+| 4b   | KMS：直接 DRM/KMS ioctl（去掉外部 helper 依赖）                                                              | **暂缓**                            |
+| 5    | XWayland：独立 Xwayland bridge、native 失败回退、XComposite 捕获、XTest 输入                                 | 基本完成（X11 target capture 待补） |
+| 6    | CLI 与脚本：全部参数、窗口管理、长按/滑动、显示器、诊断                                                      | 进行中                              |
+| 7    | Interface 化：Controller/Capture/DMA-BUF/Frame/Window/Transport/Launch 契约与 provider                       | 冻结（约 90%）                      |
 
 关键技术决策：
 
@@ -101,42 +108,67 @@ WCAS 分阶段推进，每一阶段都要有对应测试通过后才算完成：
   `wp_fractional_scale_v1` 得到比例，输入时换算、查询光标时反算。
 - **实时性。** 以 `wl_surface.frame` → `wl_callback.done`（“新帧已上屏”）作为屏障，
   而不是仅看 commit 计数；`ss` 默认等待新帧，`ss now` 立即截图。
+- **Interface 组合。** 后端按能力拆成 ABIX Interface：Controller、CaptureSource、
+  DmaBufDecoder、FrameSink、WindowEnumerator/Resolver、ProcessHost、Focus/Health/Target、
+  LaunchStrategy；`ControlledApp` 只做 facade，transport 差异由 provider 吸收。详见
+  [docs/INTERFACE.md](docs/INTERFACE.md)。
 
 ## 四、当前能力
 
-### 已实现（Wayland）
+### ABIX Interface 架构
+
+WCAS 的输入、截图、DMA-BUF 解码、窗口、推帧、进程/会话和启动策略都通过 ABIX Interface
+组合，而不是靠继承或虚函数：
+
+- 契约按**能力**拆分：`PointerController`、`CaptureSource`、`DmaBufDecoder`、
+  `FrameSink`、`WindowEnumerator`、`FocusBackend`、`HealthMonitor`、`TargetSelector` 等；
+- provider 是普通 C++ struct，方法表在绑定阶段解析；
+- 能力缺失返回 `feature_not_implemented`，不静默回退；
+- `ControlledApp` 是 facade，内部由 `SessionContext` + 各 runtime 组合。
+
+完整的契约地图、设计规则、迁移状态和“如何新增 provider”见
+[docs/INTERFACE.md](docs/INTERFACE.md)。
+
+### 已实现（Linux / Wayland + XWayland）
 
 - **协议感知代理** —— 翻译 core Wayland 与 47 个扩展协议接口，处理 `new_id`、
   `SCM_RIGHTS` FD 转发、双向对象 ID 映射、registry allowlist/denylist
-- **截图** —— `wl_shm`（mmap ARGB/XRGB）；DMA-BUF 按能力选后端（Vulkan 导入 / EGL+GBM 导入 /
-  线性 mmap），无法解码时窗口对齐回退到合成器截图（见 [docs/CAPTURE.md](docs/CAPTURE.md)）；
-  后台采集在独立线程运行，不阻塞 Wayland 消息转发
-- **输入注入** —— keymap（xkbcommon）解析按键/修饰键、Unicode 文本（优先 text-input-v3）、
-  pointer / scroll / drag、长按、长按滑动、二维拖动（旋转视角/相机）；指针锁定游戏经
-  `zwp_relative_pointer_v1` 注入相对位移
-- **窗口管理** —— 枚举进程树内全部窗口（含同一进程的多条 Wayland 连接）、按索引/app_id/标题
-  切换目标、标注窗口来源（toplevel / subsurface / bare）
+- **截图** —— `wl_shm`（mmap ARGB/XRGB）；DMA-BUF 通过 `DmaBufDecoder` 契约按能力选
+  Vulkan / EGL+GBM / 线性 mmap，无法解码时窗口对齐回退到合成器截图（见
+  [docs/CAPTURE.md](docs/CAPTURE.md)）；后台采集在独立线程运行，不阻塞 Wayland 消息转发
+- **推帧消费** —— `FrameSink` / `FrameBus`：push 式帧 fan-out、per-sink worker/
+  shared dispatcher、LatestOnly/有界队列/背压与帧池（见 [docs/FRAMES.md](docs/FRAMES.md)）
+- **输入注入** —— native：keymap（xkbcommon）解析按键/修饰键、Unicode 文本（优先
+  text-input-v3）、pointer / scroll / drag、长按、长按滑动、二维拖动；XWayland：Xlib +
+  XTest 的 `X11InputDevice` 实现同一 `PointerController` / `KeyboardController` 契约；
+  指针锁定游戏经 `zwp_relative_pointer_v1` 注入相对位移
+- **窗口管理** —— `WindowEnumerator` / `WindowResolver` 枚举进程树内全部窗口（含同一进程的
+  多条 Wayland 连接）、按 index 或平台中性 `TargetId` 切换目标、标注窗口来源
+  （toplevel / subsurface / bare）
 - **坐标换算** —— frame 像素与 surface 逻辑像素互换，支持多屏不同缩放
-- **XWayland 回退** —— native 超时后启动独立 Xwayland bridge 并经 XComposite 捕获
-- **进程管理** —— 独立 process group、`PR_SET_PDEATHSIG`、`SIGINT`→`SIGTERM`→`SIGKILL`
-  顺序清理，退出时 join 代理线程
+- **XWayland 回退** —— native 超时后启动独立 Xwayland bridge，经 XComposite 捕获，
+  并通过 XTest provider 注入输入
+- **进程管理** —— `ProcessHost` 负责独立 process group、`PR_SET_PDEATHSIG`、
+  `SIGINT`→`SIGTERM`→`SIGKILL` 顺序清理，退出时 join 代理线程
+- **启动策略** —— `LaunchStrategy` 描述/排序 native → XWayland，`ProcessHost` 执行
 
 ### 尚未完成
 
-| 能力 | 说明 |
-| --- | --- |
-| WinAPI 后端 | 计划中，未开始 |
-| Cocoa 后端 | 计划中，未开始 |
-| 多平面 / YUV DMA-BUF | `capture_dmabuf` 目前只支持单平面 RGB |
-| KMS 抓取 | 已作为合成器回退接入（需 libdrmtap 与 `CAP_SYS_ADMIN`）；改为直接 DRM/KMS ioctl 暂缓 |
-| XWayland 完整回退 | `content_timeout` 未接入 capture，X11-only 客户端端到端未验证 |
-| 负向协议测试 | 未知 opcode / 版本越界 / 畸形签名 |
+| 能力                  | 说明                                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| WinAPI 后端           | 计划中，未开始                                                                          |
+| Cocoa 后端            | 计划中，未开始                                                                          |
+| 多平面 / YUV DMA-BUF  | `DmaBufDecoder` 目前只支持单平面 RGB                                                    |
+| KMS 抓取              | 已作为合成器回退接入（需 libdrmtap 与 `CAP_SYS_ADMIN`）；改为直接 DRM/KMS ioctl 暂缓    |
+| X11 TargetId capture  | XWayland 输入已接入；按 `TargetId` 选择 X11 窗口捕获尚未完成                            |
+| X11 焦点/激活         | XWayland 当前 `FocusBackend::available() == false`                                      |
+| Interface 工厂/跨平台 | `TransportBackend::create(LaunchSpec)`、module lease、Windows/macOS provider 为未来计划 |
+| 负向协议测试          | 未知 opcode / 版本越界 / 畸形签名                                                       |
 
 ## 五、架构
 
 ```mermaid
-%%{init: {"theme": "dark", "themeVariables": {"fontColor": "#E8EAED", "primaryTextColor": "#E8EAED", "lineColor": "#9AA0A6", "clusterBkg": "#202124", "clusterBorder": "#5F6368"}}}%%
-flowchart TB
+flowchart LR
     caller["调用方<br/>C++ / FFI"]
 
     subgraph api["WCAS API"]
@@ -163,6 +195,11 @@ flowchart TB
     style api fill:#35363A,stroke:#9AA0A6,color:#E8EAED
 ```
 
+公共 API 之下是一层**能力组合**：`CaptureRuntime`、`WindowRuntime`、Controller、Focus、
+Health、Target、FrameBus 各自绑定 ABIX provider；`SessionContext` 提供 transport/session
+状态，`ProcessHost` 负责进程生命周期。各 transport 只需提供自己的 provider，不需要让
+`ControlledApp` 增加分支。详见 [docs/INTERFACE.md](docs/INTERFACE.md)。
+
 ## 六、开发与依赖
 
 ### 依赖
@@ -170,6 +207,9 @@ flowchart TB
 - 构建：CMake ≥ 3.20、Ninja、Python 3（构建期生成 wire 元数据）
 - 库：OpenCV（core/imgcodecs/imgproc）、Boost（filesystem/system/program_options）、fmt
 - 协议：libwayland（client + server）、xkbcommon、xcb + xcb-composite
+- XWayland 输入（可选）：X11 + Xtst（XTest）；缺失时 X11 输入 provider 保留但返回
+  `feature_not_implemented`
+- Interface：`third_party/ABIX`（头文件契约层）
 - GPU：Vulkan、libdrm ≥ 2.4.95、liburing
 - GPU（可选）：EGL + GLESv2 + GBM —— DMA-BUF 的 EGL 后端。缺失时该后端编译为 stub，
   采集退回 Vulkan
@@ -223,7 +263,7 @@ Lutris 用 `proton-inject-lutris.sh`。
 ### 7.2 直接用 CLI
 
 ```sh
-build/Release/wcas-test-7-functions \
+build/Release/proton-inject \
   --program /path/to/app --umu \
   --env WINEPREFIX=/path/to/prefix \
   --capture-backend dmabuf --graphics-api opengl \
@@ -232,26 +272,26 @@ build/Release/wcas-test-7-functions \
 
 主要启动参数：
 
-| 参数 | 说明 |
-| --- | --- |
-| `--program, -p` | 要启动的可执行文件 |
-| `--arg, -s` / `--env, -e` | 传给程序的参数 / 环境变量（可重复） |
-| `--proton` / `--wine` / `--umu` | 启动方式 |
-| `--graphics-api, -g` | `dxvk`(默认) 或 `vulkan`(`vk`，游戏原生) 或 `opengl`(`gl`/`wined3d`) |
-| `--capture-backend, -b` | `client`(默认) / `shm` / `dmabuf` / `kms` |
-| `--bridge-width/-height, -x/-y` | XWayland 回退桥接分辨率 |
-| `--match-regex, -r` | 额外的子窗口进程匹配正则（默认取目标程序父目录） |
-| `--output` | 启动后把窗口移到指定 Hyprland 显示器（如 `DP-2`） |
-| `--key-delay` | 发送 key 前等待秒数（便于手动聚焦） |
-| `--allow-activation` | 放行选中窗口的激活请求，使其接收键盘（会夺取焦点） |
-| `--debug-all` | 打开全部调试类别（等价 `WCAS_DEBUG=1`） |
-| `--debug-capture` | 采集/截图调试（调度器丢弃、槽超时） |
-| `--debug-dmabuf` | DMA-BUF 导入/回读诊断（`[wcas:dmabuf]`） |
-| `--debug-harness` | 启动/native 等待/XWayland 回退（`[wcas:harness]`） |
-| `--debug-proxy` | 连接生命周期与消息转发（`[wcas:proxy]`） |
-| `--debug-input` | 注入的指针/键盘输入（`[wcas:input]`） |
-| `--debug-xwayland` | XWayland 桥（`[wcas:xwayland]`） |
-| `--debug-wire` | 逐条 Wayland 消息追踪（`[wcas:wire]`） |
+| 参数                            | 说明                                                                 |
+| ------------------------------- | -------------------------------------------------------------------- |
+| `--program, -p`                 | 要启动的可执行文件                                                   |
+| `--arg, -s` / `--env, -e`       | 传给程序的参数 / 环境变量（可重复）                                  |
+| `--proton` / `--wine` / `--umu` | 启动方式                                                             |
+| `--graphics-api, -g`            | `dxvk`(默认) 或 `vulkan`(`vk`，游戏原生) 或 `opengl`(`gl`/`wined3d`) |
+| `--capture-backend, -b`         | `client`(默认) / `shm` / `dmabuf` / `kms`                            |
+| `--bridge-width/-height, -x/-y` | XWayland 回退桥接分辨率                                              |
+| `--match-regex, -r`             | 额外的子窗口进程匹配正则（默认取目标程序父目录）                     |
+| `--output`                      | 启动后把窗口移到指定 Hyprland 显示器（如 `DP-2`）                    |
+| `--key-delay`                   | 发送 key 前等待秒数（便于手动聚焦）                                  |
+| `--allow-activation`            | 放行选中窗口的激活请求，使其接收键盘（会夺取焦点）                   |
+| `--debug-all`                   | 打开全部调试类别（等价 `WCAS_DEBUG=1`）                              |
+| `--debug-capture`               | 采集/截图调试（调度器丢弃、槽超时）                                  |
+| `--debug-dmabuf`                | DMA-BUF 导入/回读诊断（`[wcas:dmabuf]`）                             |
+| `--debug-harness`               | 启动/native 等待/XWayland 回退（`[wcas:harness]`）                   |
+| `--debug-proxy`                 | 连接生命周期与消息转发（`[wcas:proxy]`）                             |
+| `--debug-input`                 | 注入的指针/键盘输入（`[wcas:input]`）                                |
+| `--debug-xwayland`              | XWayland 桥（`[wcas:xwayland]`）                                     |
+| `--debug-wire`                  | 逐条 Wayland 消息追踪（`[wcas:wire]`）                               |
 
 调试类别可用各自的环境变量单独开启：`WCAS_DEBUG_HARNESS` / `WCAS_DEBUG_PROXY` /
 `WCAS_DEBUG_INPUT` / `WCAS_DEBUG_CAPTURE` / `WCAS_DEBUG_DMABUF` /
@@ -281,6 +321,10 @@ status                       进程、transport、commit/frame 计数、窗口�
 help|h / quit|exit|q
 ```
 
+交互模式下命令行由 [cmdly](https://github.com/Sukanle/cmdly) 提供：支持行内编辑
+（←/→/Home/End 及退格）、↑/↓ 历史、Tab 补全命令名，Ctrl-C / Ctrl-D 退出。stdin
+不是终端时（脚本管道）自动退回逐行读取，不输出提示符与回显。
+
 常用工作流：
 
 ```
@@ -297,10 +341,10 @@ key Alt-C            # 发送 Alt+C
 游戏窗口通常通过 DMA-BUF 提交 `wl_buffer`，其布局由 DRM modifier 描述（可能是厂商 tiled /
 block-linear，甚至带帧缓冲压缩）。WCAS 用环境变量选择解码后端：
 
-| 变量 | 取值 | 说明 |
-| --- | --- | --- |
-| `WCAS_DMABUF_BACKEND` | `auto`(默认) / `vulkan` / `egl` | DMA-BUF 解码后端 |
-| `WCAS_CAPTURE_TIMING` | 设 `1` 打开 | 每次采集打印 `[wcas] capture timing: backend=... <ms>`（默认关闭） |
+| 变量                  | 取值                            | 说明                                                               |
+| --------------------- | ------------------------------- | ------------------------------------------------------------------ |
+| `WCAS_DMABUF_BACKEND` | `auto`(默认) / `vulkan` / `egl` | DMA-BUF 解码后端                                                   |
+| `WCAS_CAPTURE_TIMING` | 设 `1` 打开                     | 每次采集打印 `[wcas] capture timing: backend=... <ms>`（默认关闭） |
 
 三个后端：
 
@@ -352,10 +396,10 @@ KMS 裁剪读取合成结果，不会返回整屏或多显示器拼接。完整�
 排查结论：**根因是腾讯 ACE 反作弊驱动与 Wine/Proton 的 win32 内核接口不兼容，不是 WCAS 的问题。**
 
 - 游戏日志可见 ACE 驱动调用 Wine 未实现的内核函数，Wine 直接 abort：
-  ```
-  wine: Call from ... to unimplemented function ntoskrnl.exe.InbvAcquireDisplayOwnership, aborting
-  wine: Call from ... to unimplemented function ntoskrnl.exe.SeQueryInformationToken, aborting
-  ```
+    ```
+    wine: Call from ... to unimplemented function ntoskrnl.exe.InbvAcquireDisplayOwnership, aborting
+    wine: Call from ... to unimplemented function ntoskrnl.exe.SeQueryInformationToken, aborting
+    ```
 - 这些 abort 在**不经 WCAS、直连 `umu-run`** 时同样出现；直连通常存活，经 WCAS（私有 Wayland
   代理）时偶发致命。代理只改变了时序，且逐条消息对比确认**代理没有漏转发或
   改写消息**——根因不在 WCAS。
@@ -373,19 +417,20 @@ KMS 裁剪读取合成结果，不会返回整屏或多显示器拼接。完整�
   布局，WCAS 会明确拒绝而不是输出花屏。
 - **KMS 抓取**依赖 libdrmtap 与 `CAP_SYS_ADMIN`；作为合成器回退时其裁剪按物理像素，
   输出缩放非 1:1 时可能出现偏移（此时 `grim -g` 优先，因为用的是布局坐标）。
-- **XWayland 完整回退**未端到端验证。
+- **X11 目标捕获/焦点**：XWayland 输入已接入，但按 `TargetId` 选择 X11 窗口捕获、
+  `_NET_ACTIVE_WINDOW` 焦点仍待实现。
 - 某些应用（如公告层、CEF）会**泄漏大量 surface** 且从不销毁；WCAS 用提交新近度区分活跃窗口，
   但历史 surface 仍会累积。
 - **激活与不抢焦点天生冲突**：要让 Unity/Wine 收键通常需要窗口被激活，而激活会带走用户焦点。
   新窗口抢焦点主要是合成器（如 Hyprland 默认聚焦新 toplevel）行为，可用窗口规则缓解：
 
-  ```conf
-  misc {
-      focus_on_activate = false
-      initial_workspace_tracking = 0
-  }
-  windowrulev2 = noinitialfocus, class:^(arknights\.exe)$
-  ```
+    ```conf
+    misc {
+        focus_on_activate = false
+        initial_workspace_tracking = 0
+    }
+    windowrulev2 = noinitialfocus, class:^(arknights\.exe)$
+    ```
 
 ## 九、安全模型
 
@@ -404,18 +449,22 @@ WCAS **不**为受控应用提供沙箱：被控应用仍拥有调用方用户�
 ## 十、项目结构
 
 ```
-include/skl/wcas/     公共头文件（wcas.h 为主要 API）
+include/skl/wcas/     公共头文件（wcas.h；controller/capture/frame/window/transport 等契约）
 src/skl/wcas/
   proxy/              Wayland 代理：reactor、wire 翻译、interfaces、surface 观察、
-                      输入、截图槽位、Vulkan / EGL+GBM DMA-BUF 导入
-  harness/            ComputerUse（启动器）、ControlledApp（控制）、session（会话表）
+                      输入、截图槽位、DMA-BUF decoder、Vulkan / EGL+GBM 导入
+  harness/            ComputerUse、ControlledApp、ProcessHost、SessionContext、
+                      Capture/Window/Focus/Health/Target/FrameBus/LaunchStrategy、
+                      X11 XTest 输入
   xwayland.cpp        XWayland bridge
-  x11_capture.cpp     X11/XComposite 抓取
+  x11_capture.cpp     X11/XComposite 抓取与窗口枚举
   drm.cpp             DRM/KMS 与窗口几何
   dmabuf_probe.cpp    DMA-BUF 能力探测
+third_party/ABIX/     Interface 契约与 proxy 实现（头文件）
 codegen/              由协议 XML 生成 wire 元数据（构建期执行）
 tests/                单元测试与协议集成测试（fake Wayland 环境）
-docs/                 项目文档（CAPTURE / COMPATIBILITY / MAA-COMPARISON / Proton / SECURITY）
+docs/                 项目文档（INTERFACE / CAPTURE / COMPATIBILITY / CONTROLLER /
+                      FRAMES / MAA-COMPARISON / Proton / SECURITY）
 proton-inject*.sh     Proton / Lutris 启动包装
 ```
 
