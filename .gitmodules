@@ -1,3 +1,10 @@
 [submodule "third_party/libdrmtap"]
 	path = third_party/libdrmtap
 	url = https://github.com/fxd0h/libdrmtap.git
+[submodule "third_party/cmdly"]
+	path = third_party/cmdly
+	url = git@github.com:sukanle/cmdly.git
+[submodule "third_party/ABIX"]
+	path = third_party/ABIX
+	url = git@github.com:sukanle/ABIX.git
+	branch = v0.2.0
