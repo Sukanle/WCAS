@@ -2,13 +2,9 @@
 
 本文说明 WCAS 如何把目标窗口提交的缓冲区变成一张 PNG/`cv::Mat`，重点在 DMA-BUF 的 **后端选择、能力协商与回退**。
 
-> 实现层：`ControlledApp::capture()` 通过 `CaptureInfo` / `CaptureSource` 接口委托给
-> `AutoCaptureSource`（`src/skl/wcas/harness/capture_source.cpp`）；`CaptureKind`
-> 是公开的后端选择，具体 shm / DMA-BUF / KMS / grim / X11 回退在 source 内部完成。
+> 实现层：`ControlledApp::capture()` 通过 `CaptureInfo` / `CaptureSource` 接口委托给 `AutoCaptureSource`（`src/skl/wcas/harness/capture_source.cpp`）；`CaptureKind` 是公开的后端选择，具体 shm / DMA-BUF / KMS / grim / X11 回退在 source 内部完成。
 
-> DMA-BUF 解码层：`DmaBufDecoder`（`src/skl/wcas/proxy/dmabuf_decoder.h`）提供
-> Auto / Vulkan / EGL / mmap providers；`capture_dmabuf_plane()` 绑定一次
-> `AutoDecoder`，按 `WCAS_DMABUF_BACKEND` 与格式/modifier 能力选择解码器。
+> DMA-BUF 解码层：`DmaBufDecoder`（`src/skl/wcas/proxy/dmabuf_decoder.h`）提供 Auto / Vulkan / EGL / mmap providers；`capture_dmabuf_plane()` 绑定一次 `AutoDecoder`，按 `WCAS_DMABUF_BACKEND` 与格式/modifier 能力选择解码器。
 
 ## 两类缓冲区
 
