@@ -8,10 +8,10 @@ WCAS 是 Wayland 原生的窗口捕获 / 输入注入工具。它为被启动的
 
 ### 适配的游戏
 
-| 状态 | 游戏 |
-| --- | --- |
-| 已适配 | 明日方舟、明日方舟：终末地 |
-| 计划适配 | 鸣潮、异环、绝区零 |
+| 状态     | 游戏                       |
+| -------- | -------------------------- |
+| 已适配   | 明日方舟、明日方舟：终末地 |
+| 计划适配 | 鸣潮、异环、绝区零         |
 
 ## 工作原理
 
@@ -55,14 +55,14 @@ WCAS 启动游戏进程，并把环境变量 `WAYLAND_DISPLAY` 指向私有 sock
 
 ### 预设环境变量
 
-| 环境变量 | 值 | 说明 |
-| --- | --- | --- |
-| `PROTON_ENABLE_WAYLAND` / `PROTON_USE_WAYLAND` | `1` | 强制 Proton 使用 Wayland 后端 |
-| `WINEDLLOVERRIDES` | `dxgi=n,b` | 禁用内置 dxgi，让 DXVK 接管 |
-| `WINE_GST_REGISTRY_DIR` | `/tmp/wine-gst` | 避免 GST 注册表冲突 |
-| `WAYLAND_DISPLAY` | 私有 socket | 自动设置，指向私有代理 |
-| `WCAS_DMABUF_BACKEND` | `auto` | DMA-BUF 后端：`auto` / `vulkan` / `egl` |
-| `WCAS_CAPTURE_TIMING` | 关 | 设 `1` 打印每次采集耗时 |
+| 环境变量                                       | 值              | 说明                                    |
+| ---------------------------------------------- | --------------- | --------------------------------------- |
+| `PROTON_ENABLE_WAYLAND` / `PROTON_USE_WAYLAND` | `1`             | 强制 Proton 使用 Wayland 后端           |
+| `WINEDLLOVERRIDES`                             | `dxgi=n,b`      | 禁用内置 dxgi，让 DXVK 接管             |
+| `WINE_GST_REGISTRY_DIR`                        | `/tmp/wine-gst` | 避免 GST 注册表冲突                     |
+| `WAYLAND_DISPLAY`                              | 私有 socket     | 自动设置，指向私有代理                  |
+| `WCAS_DMABUF_BACKEND`                          | `auto`          | DMA-BUF 后端：`auto` / `vulkan` / `egl` |
+| `WCAS_CAPTURE_TIMING`                          | 关              | 设 `1` 打印每次采集耗时                 |
 
 ## 集成机制
 
@@ -72,11 +72,11 @@ WCAS 启动游戏进程，并把环境变量 `WAYLAND_DISPLAY` 指向私有 sock
 
 ### 捕获后端（按能力选，自动回退）
 
-| 优先级 | 后端 | 说明 | 需特权 |
-|--------|------|------|--------|
-| 🥇 | **DMA-BUF** | 两条导入路径：**Vulkan**（`VK_EXT_image_drm_format_modifier`）与 **EGL/GBM**（`EGL_EXT_image_dma_buf_import[_modifiers]`），按设备能力选择；高效，可后台不抢占 | 无 |
-| 🥈 | **DRM/KMS (libdrmtap)** | 从内核 DRM 子系统读最终合成帧缓冲，按窗口几何裁剪；**需权限且抢占前端显示** | `CAP_SYS_ADMIN` |
-| 🥉 | **wl_shm** | 读代理的共享内存缓冲，适用于软件渲染；兼容好但性能差 | 无 |
+| 优先级 | 后端                    | 说明                                                                                                                                                           | 需特权          |
+| ------ | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| ★★★    | **DMA-BUF**             | 两条导入路径：**Vulkan**（`VK_EXT_image_drm_format_modifier`）与 **EGL/GBM**（`EGL_EXT_image_dma_buf_import[_modifiers]`），按设备能力选择；高效，可后台不抢占 | 无              |
+| ★★     | **DRM/KMS (libdrmtap)** | 从内核 DRM 子系统读最终合成帧缓冲，按窗口几何裁剪；**需权限且抢占前端显示**                                                                                    | `CAP_SYS_ADMIN` |
+| ★      | **wl_shm**              | 读代理的共享内存缓冲，适用于软件渲染；兼容好但性能差                                                                                                           | 无              |
 
 > 若 DMA-BUF 失败，自动回退到 DRM/KMS → wl_shm。窗口自身缓冲无法解码时，**窗口对齐**回退到合成器截图（grim / KMS），不会返回整屏。
 
@@ -98,12 +98,29 @@ WCAS 启动游戏进程，并把环境变量 `WAYLAND_DISPLAY` 指向私有 sock
 
 DMA-BUF 采用异步三阶段管线，避免阻塞 Wayland 代理线程：
 
-```
-Stage 1（Wayland 代理线程）: wl_surface.commit → 创建 CaptureJob → 入队 → 立即返回
-Stage 2（Capture Worker）:   EXPORT_SYNC_FILE 快照 fence → VkSemaphore 导入
-                             → DMA-BUF fd → VkImage（DRM modifier 导入）
-                             → GPU copy 到 staging buffer → wait fence
-Stage 3（CPU）:              读 staging（紧密排列，行 = width × 4）→ 解码为 RGB
+```mermaid
+flowchart LR
+    subgraph S1["Stage 1（Wayland 代理线程）"]
+        A1["wl_surface.commit"] --> A2["创建 CaptureJob"]
+        A2 --> A3["入队"]
+        A3 --> A4["立即返回"]
+    end
+
+    subgraph S2["Stage 2（Capture Worker）"]
+        B1["EXPORT_SYNC_FILE 快照 fence"] --> B2["VkSemaphore 导入"]
+        B2 --> B3["DMA-BUF fd"]
+        B3 --> B4["VkImage（DRM modifier 导入）"]
+        B4 --> B5["GPU copy 到 staging buffer"]
+        B5 --> B6["wait fence"]
+    end
+
+    subgraph S3["Stage 3（CPU）"]
+        C1["读 staging（紧密排列，行 = width × 4）"] --> C2["解码为 RGB"]
+    end
+
+    A3 == "CaptureJob 队列 / 异步交接" ==> B1
+    B6 == "GPU 完成 / fence 满足" ==> C1
+    A4 -. "不阻塞代理线程" .-> S2
 ```
 
 ### 窗口裁剪
