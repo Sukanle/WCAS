@@ -1,4 +1,5 @@
 #pragma once
+#include "skl/wcas/types.h"
 
 #include "interfaces.h"
 
@@ -112,7 +113,7 @@ struct DmaBufPlane {
 };
 
 struct DmaBufParams {
-    std::array<std::optional<DmaBufPlane>, 4> planes{};
+    std::array<optional<DmaBufPlane>, 4> planes{};
     /// Arguments of the asynchronous `create` request. The buffer id is only
     /// delivered later in the `created` event, so the metadata has to be kept
     /// here until then.
@@ -127,14 +128,14 @@ struct DmaBufBuffer {
     std::int32_t height = 0;
     std::uint32_t format = 0;
     std::uint32_t flags = 0;
-    std::array<std::optional<DmaBufPlane>, 4> planes{};
+    std::array<optional<DmaBufPlane>, 4> planes{};
 };
 
 /// A committed DMA-BUF frame, retained independently of the protocol buffer
 /// so capture still works after the client destroys the wl_buffer or the
 /// buffer params object. The plane FDs are duplicates owned by this struct.
 struct RetainedDmaBuf {
-    std::array<std::optional<DmaBufPlane>, 4> planes{};
+    std::array<optional<DmaBufPlane>, 4> planes{};
     std::int32_t width = 0;
     std::int32_t height = 0;
     std::uint32_t format = 0;
@@ -142,15 +143,15 @@ struct RetainedDmaBuf {
 
 struct ToplevelState {
     std::uint32_t surface_id = 0;
-    std::optional<std::string> app_id;
-    std::optional<std::string> title;
+    optional<std::string> app_id;
+    optional<std::string> title;
 };
 
 /// A surface's app_id/title, either from a live toplevel or inherited from an
 /// ancestor. Empty optionals mean "no name known".
 struct SurfaceMetadata {
-    std::optional<std::string> app_id;
-    std::optional<std::string> title;
+    optional<std::string> app_id;
+    optional<std::string> title;
 };
 
 /// How a listed window was discovered, so callers can tell a real toplevel
@@ -167,20 +168,20 @@ enum class WindowOrigin : uint8_t {
 /// surface). Used by the CLI `list` command and window selection.
 struct WindowInfo {
     std::uint32_t surface_id = 0;
-    std::optional<std::string> app_id;
-    std::optional<std::string> title;
+    optional<std::string> app_id;
+    optional<std::string> title;
     std::int32_t width = 0;
     std::int32_t height = 0;
     WindowOrigin origin = WindowOrigin::Bare;
 };
 
 struct SurfaceState {
-    std::optional<std::uint32_t> pending_buffer;
-    std::optional<std::uint32_t> committed_buffer;
-    std::optional<std::uint32_t> pending_dmabuf;
-    std::optional<std::uint32_t> committed_dmabuf;
-    std::optional<RetainedShm> committed_frame;
-    std::optional<RetainedDmaBuf> committed_dmabuf_frame;
+    optional<std::uint32_t> pending_buffer;
+    optional<std::uint32_t> committed_buffer;
+    optional<std::uint32_t> pending_dmabuf;
+    optional<std::uint32_t> committed_dmabuf;
+    optional<RetainedShm> committed_frame;
+    optional<RetainedDmaBuf> committed_dmabuf_frame;
     std::uint64_t commit_count = 0;
     /// Global commit counter value of this surface's most recent commit. Used
     /// to tell which of several rendering surfaces is the one the app is
@@ -207,7 +208,7 @@ struct ConnState {
     /// accept synthetic keyboard input). Dropped otherwise to avoid stealing
     /// the user's focus. Set on the session the caller explicitly selected.
     std::atomic<bool> allow_activation{false};
-    /// The selected capture backend, mirroring the public `CaptureBackend`
+    /// The selected capture backend, mirroring the public `CaptureKind`
     /// enum order: 0=client_buffer, 1=kms, 2=shm, 3=dmabuf.
     std::atomic<int> capture_backend{0};
     /// When true the event loop runs the periodic background capture
@@ -247,14 +248,14 @@ struct ConnState {
     /// to the toplevel that carries app_id/title.
     std::unordered_map<std::uint32_t, std::uint32_t> subsurface_to_surface;
     std::unordered_map<std::uint32_t, std::uint32_t> surface_to_parent_surface;
-    std::optional<std::string> capture_app_id;
-    std::optional<std::string> capture_title;
+    optional<std::string> capture_app_id;
+    optional<std::string> capture_title;
     /// Explicitly selected window surface (app ID). When set, both capture and
     /// input target it instead of the focus/commit heuristics. Used to bring a
     /// later-started child window (e.g. an in-game overlay) under control.
     std::uint32_t preferred_surface = 0;
     /// Latest frame produced by the background capture scheduler, if any.
-    std::optional<cv::Mat> pre_captured_frame;
+    optional<cv::Mat> pre_captured_frame;
 
     // Input tracking
     std::uint32_t pointer_obj = 0;       // App-side wl_pointer object ID
@@ -315,7 +316,7 @@ bool capture_dmabuf(const std::shared_ptr<ConnState> &state, cv::Mat &image);
 /// surface-local (logical) pixels used by wl_pointer. 1.0 when unknown.
 double input_scale(const std::shared_ptr<ConnState> &state, std::uint32_t surface_id);
 void set_capture_target(
-    const std::shared_ptr<ConnState> &state, std::optional<std::string> app_id, std::optional<std::string> title);
+    const std::shared_ptr<ConnState> &state, optional<std::string> app_id, optional<std::string> title);
 /// Enumerate the session's capturable windows (toplevels plus bare committed
 /// surfaces), newest metadata included. Used by `list` / window selection.
 std::vector<WindowInfo> list_windows(const std::shared_ptr<ConnState> &state);
@@ -327,8 +328,8 @@ struct SurfaceDebug {
     std::string role;
     std::uint32_t parent_surface_id = 0;
     std::uint32_t toplevel_id = 0;
-    std::optional<std::string> app_id;
-    std::optional<std::string> title;
+    optional<std::string> app_id;
+    optional<std::string> title;
     std::int32_t width = 0;
     std::int32_t height = 0;
     bool has_frame = false;

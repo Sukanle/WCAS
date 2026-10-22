@@ -269,7 +269,7 @@ bool egl_dmabuf_import_supported(std::uint32_t fourcc, std::uint64_t modifier) {
     return std::find(modifiers.begin(), modifiers.end(), static_cast<EGLuint64KHR>(modifier)) != modifiers.end();
 }
 
-std::optional<std::vector<std::uint8_t>> egl_read_dmabuf(int fd, std::uint32_t width, std::uint32_t height,
+optional<std::vector<std::uint8_t>> egl_read_dmabuf(int fd, std::uint32_t width, std::uint32_t height,
     std::uint32_t stride, std::uint64_t modifier, std::uint32_t fourcc, std::uint32_t offset) {
     if (fd < 0 || width == 0 || height == 0) return std::nullopt;
     auto &d = egl_device();
@@ -328,7 +328,7 @@ std::optional<std::vector<std::uint8_t>> egl_read_dmabuf(int fd, std::uint32_t w
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
 
-    std::optional<std::vector<std::uint8_t>> result;
+    optional<std::vector<std::uint8_t>> result;
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         trace_capture("egl backend: imported texture is not framebuffer-complete");
     } else {
@@ -368,7 +368,7 @@ bool egl_dmabuf_import_supported(std::uint32_t fourcc, std::uint64_t modifier) {
     return false;
 }
 
-std::optional<std::vector<std::uint8_t>> egl_read_dmabuf(int fd, std::uint32_t width, std::uint32_t height,
+optional<std::vector<std::uint8_t>> egl_read_dmabuf(int fd, std::uint32_t width, std::uint32_t height,
     std::uint32_t stride, std::uint64_t modifier, std::uint32_t fourcc, std::uint32_t offset) {
     (void)fd;
     (void)width;

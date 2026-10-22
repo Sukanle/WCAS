@@ -1,5 +1,5 @@
 #!/bin/sh
-# CLI smoke test for wcas-test-7-functions. Mirrors the Rust example's argument
+# CLI smoke test for proton-inject. Mirrors the Rust example's argument
 # contract: unknown/missing arguments fail, and `--test-dmabuf` runs the probe.
 set -eu
 

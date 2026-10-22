@@ -32,7 +32,7 @@ struct ProbeResults {
 /// Exercises `DMA_BUF_IOCTL_SYNC`, `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` (READ /
 /// WRITE / READ|WRITE), `poll()` on both directions and the io_uring
 /// `POLL_ADD` single-shot and multishot paths. The caller owns `fd`.
-class WCAS_API DmaBufSyncProbe {
+class SKL_WCAS_API DmaBufSyncProbe {
 public:
     explicit DmaBufSyncProbe(int fd) noexcept
         : fd_(fd) {}
@@ -52,9 +52,9 @@ private:
 };
 
 /// Record a discovered DMA-BUF fd for the `testdmabuf` CLI command (deduped).
-WCAS_API void track_dmabuf_fd(int fd);
-[[nodiscard]] WCAS_API std::vector<int> tracked_dmabuf_fds();
-WCAS_API void clear_tracked_dmabuf_fds();
+SKL_WCAS_API void track_dmabuf_fd(int fd);
+[[nodiscard]] SKL_WCAS_API std::vector<int> tracked_dmabuf_fds();
+SKL_WCAS_API void clear_tracked_dmabuf_fds();
 
 }   // namespace wcas
 }   // namespace skl

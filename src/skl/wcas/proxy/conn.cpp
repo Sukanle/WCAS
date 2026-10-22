@@ -161,7 +161,7 @@ std::string wire_string(const std::vector<char> &msg, std::size_t at, std::size_
 }
 
 /// Close every plane fd retained in a DMA-BUF snapshot and mark it empty.
-void release_dmabuf_planes(const std::array<std::optional<DmaBufPlane>, 4> &planes) {
+void release_dmabuf_planes(const std::array<optional<DmaBufPlane>, 4> &planes) {
     for (const auto &plane : planes) {
         if (plane && plane->fd >= 0) ::close(plane->fd);
     }
@@ -1223,7 +1223,7 @@ bool capture_dmabuf(const std::shared_ptr<ConnState> &state, cv::Mat &image) {
 }
 
 void set_capture_target(
-    const std::shared_ptr<ConnState> &state, std::optional<std::string> app_id, std::optional<std::string> title) {
+    const std::shared_ptr<ConnState> &state, optional<std::string> app_id, optional<std::string> title) {
     if (!state) return;
     std::lock_guard lock(state->data_mutex);
     state->capture_app_id = std::move(app_id);
@@ -1291,7 +1291,7 @@ std::vector<WindowInfo> list_windows(const std::shared_ptr<ConnState> &state) {
     // attribute the most recently committed nameless surface to the toplevel;
     // if the toplevel renders itself we leave other surfaces alone, and stale
     // leftovers stay "bare".
-    std::optional<SurfaceMetadata> sole_toplevel;
+    optional<SurfaceMetadata> sole_toplevel;
     std::size_t shell_toplevels = 0;
     for (const auto &[tid, top] : state->toplevels) {
         (void)tid;
@@ -1402,7 +1402,7 @@ std::vector<SurfaceDebug> dump_surfaces(const std::shared_ptr<ConnState> &state)
 double input_scale(const std::shared_ptr<ConnState> &state, std::uint32_t surface_id) {
     if (!state || !surface_id) return 1.0;
     std::lock_guard lock(state->data_mutex);
-    const auto scale_of = [&state](std::uint32_t sid) -> std::optional<double> {
+    const auto scale_of = [&state](std::uint32_t sid) -> optional<double> {
         std::int32_t buffer_width = 0;
         const auto surface = state->surfaces.find(sid);
         if (surface != state->surfaces.end()) {
@@ -1449,7 +1449,7 @@ namespace {
 
 /// Build a capture job from the primary committed DMA-BUF frame, duplicating
 /// the plane fd so it outlives the protocol message.
-std::optional<CaptureJob> make_capture_job(const std::shared_ptr<ConnState> &state) {
+optional<CaptureJob> make_capture_job(const std::shared_ptr<ConnState> &state) {
     std::lock_guard lock(state->data_mutex);
     const RetainedDmaBuf *selected = nullptr;
     for (const auto &[sid, surf] : state->surfaces) {

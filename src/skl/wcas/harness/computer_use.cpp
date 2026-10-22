@@ -3,6 +3,8 @@
 
 #include "debug.h"
 #include "harness/controlled_app_impl.h"
+#include "harness/launch_strategy.h"
+#include "harness/process_host.h"
 #include "harness/session.h"
 #include "x11_capture.h"
 #include "xwayland.h"
@@ -167,8 +169,7 @@ ComputerUseBuilder &ComputerUseBuilder::content_timeout(std::chrono::millisecond
     return *this;
 }
 ComputerUseBuilder &ComputerUseBuilder::bridge_geometry(int w, int h) noexcept {
-    bridge_width_ = w;
-    bridge_height_ = h;
+    bridge_window = cv::Size(w, h);
     return *this;
 }
 ComputerUseBuilder &ComputerUseBuilder::for_proton() noexcept {
@@ -179,16 +180,16 @@ result<ComputerUse> ComputerUseBuilder::build() const {
     if (native_timeout_.count() <= 0
         || fallback_timeout_.count() <= 0
         || content_timeout_.count() <= 0
-        || bridge_width_ < 160
-        || bridge_height_ < 120)
+        || bridge_window.width < 160
+        || bridge_window.height < 120)
         return code(errc::unspecified);
     auto out = ComputerUse::create();
     if (out) {
         out.value().impl_->native_timeout = native_timeout_;
         out.value().impl_->fallback_timeout = fallback_timeout_;
         out.value().impl_->content_timeout = content_timeout_;
-        out.value().impl_->bridge_width = bridge_width_;
-        out.value().impl_->bridge_height = bridge_height_;
+        out.value().impl_->bridge_width = bridge_window.width;
+        out.value().impl_->bridge_height = bridge_window.height;
     }
     return out;
 }
@@ -290,82 +291,34 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
     // XWayland bridge environment instead of the native Wayland socket.
     auto attempt = [&](bool use_x11, const std::string &display, const std::string &xauthority,
                        std::unique_ptr<XwaylandBridge> bridge) -> result<ControlledApp> {
+        ProcessSpec spec;
+        spec.program = config.program_;
+        spec.args = config.args_;
+        spec.env = config.env_;
+        spec.current_dir = config.current_dir_;
+        spec.inherit_diagnostics = config.inherit_diagnostics_;
+        spec.gpu_accelerated = config.gpu_accelerated_;
+        spec.graphics_api = config.graphics_api_;
+        spec.use_x11 = use_x11;
+        spec.display = display;
+        spec.xauthority = xauthority;
+        spec.wayland_socket = impl_->socket_name;
+
+        auto process = std::make_unique<ProcessHost>();
+        if (!process->spawn(spec)) return code(errc::process_spawn_failed);
+        const pid_t child = process->pid();
         const auto start_time = std::chrono::steady_clock::now();
-        const pid_t child = ::fork();
-        if (child < 0) return code(errc::process_spawn_failed);
-        if (child == 0) {
-            ::setpgid(0, 0);
-            ::prctl(PR_SET_PDEATHSIG, SIGKILL);
-            if (!config.inherit_diagnostics_) {
-                const int fd = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
-                if (fd >= 0) {
-                    ::dup2(fd, 1);
-                    ::dup2(fd, 2);
-                    if (fd > 2) ::close(fd);
-                }
-            }
-            if (config.current_dir_) ::chdir(config.current_dir_->c_str());
-            if (use_x11) {
-                ::setenv("DISPLAY", display.c_str(), 1);
-                ::setenv("XAUTHORITY", xauthority.c_str(), 1);
-                ::setenv("XDG_SESSION_TYPE", "x11", 1);
-                ::unsetenv("WAYLAND_DISPLAY");
-            } else {
-                ::setenv("WAYLAND_DISPLAY", impl_->socket_name.c_str(), 1);
-                ::setenv("GDK_BACKEND", "wayland", 1);
-                ::setenv("QT_QPA_PLATFORM", "wayland", 1);
-            }
-            if (!config.gpu_accelerated_) ::setenv("LIBGL_ALWAYS_SOFTWARE", "1", 1);
-            switch (config.graphics_api_) {
-                case GraphicsApi::opengl: ::setenv("PROTON_USE_WINED3D", "1", 1); break;
-                case GraphicsApi::vulkan:
-                    // Native Vulkan: keep DXVK out of the way so the game uses
-                    // its own Vulkan renderer. DXVK installs itself as the
-                    // d3d9/d3d11/dxgi provider, so those have to be switched off
-                    // or Proton's DirectX translation runs regardless of what
-                    // the renderer is.
-                    ::unsetenv("PROTON_USE_WINED3D");
-                    ::setenv("WINEDLLOVERRIDES", "d3d9,d3d10core,d3d11,dxgi=n", 1);
-                    break;
-                case GraphicsApi::dxvk: ::unsetenv("PROTON_USE_WINED3D"); break;
-            }
-            for (const auto &e : config.env_) {
-                if (e.second)
-                    ::setenv(e.first.c_str(), e.second->c_str(), 1);
-                else
-                    ::unsetenv(e.first.c_str());
-            }
-            if (use_x11) {
-                // Force X11 last: the caller's env may enable Wayland (e.g.
-                // PROTON_ENABLE_WAYLAND=1 from the wrapper) and is applied just
-                // above. Without clearing it the fallback still runs winewayland,
-                // which hits an unimplemented INBV path on some Proton builds
-                // (ntoskrnl.exe.InbvAcquireDisplayOwnership) and aborts the game.
-                ::unsetenv("WAYLAND_DISPLAY");
-                ::unsetenv("PROTON_ENABLE_WAYLAND");
-                ::unsetenv("PROTON_USE_WAYLAND");
-                ::unsetenv("GDK_BACKEND");
-                ::unsetenv("QT_QPA_PLATFORM");
-            }
-            std::vector<char *> argv{const_cast<char *>(config.program_.c_str())};
-            for (const auto &arg : config.args_)
-                argv.push_back(const_cast<char *>(arg.c_str()));
-            argv.push_back(nullptr);
-            ::execvp(argv[0], argv.data());
-            _exit(127);
-        }
-        ::setpgid(child, child);
         if (use_x11) {
             // X11-only apps never connect to the Wayland proxy socket, so the
             // success condition is visible content on the bridge display,
             // bounded by content_timeout.
             const auto content_start = std::chrono::steady_clock::now();
             while (std::chrono::steady_clock::now() - content_start < impl_->content_timeout) {
-                int status = 0;
-                if (::waitpid(child, &status, WNOHANG) == child) return code(errc::process_spawn_failed);
+                if (process->poll_exited()) return code(errc::process_spawn_failed);
                 auto frame = capture_x11_window(display, xauthority);
                 if (frame.has_value() && x11_frame_has_visible_content(frame.value())) {
                     auto app = std::make_unique<ControlledApp::Impl>();
+                    app->process = std::move(process);
                     app->child = child;
                     app->process_group = child;
                     app->transport = Transport::xwayland;
@@ -375,7 +328,7 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
-            detail::terminate_group(child);
+            process->terminate();
             return code(errc::xwayland_bridge_failed);
         }
 
@@ -415,8 +368,8 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
                 if (session->connected) break;
                 session.reset();
             }
-            int status = 0;
-            if (::waitpid(child, &status, WNOHANG) == child) {
+            if (process->poll_exited()) {
+                const int status = process->exit_status();
                 debug_trace(DebugCategory::Harness,
                     fmt::format("native child pid={} exited (status={}), session={} connected={} session_seen={}",
                         child, WIFEXITED(status) ? WEXITSTATUS(status) : -1, session ? "yes" : "no",
@@ -437,10 +390,11 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
                         .count(),
                     session ? "yes" : "no", session && session->connected.load() ? 1 : 0,
                     session && session->capturable_surface.load() ? 1 : 0, session ? session->commit_count.load() : 0));
-            detail::terminate_group(child);
+            process->terminate();
             return code(errc::native_wayland_timeout);
         }
         auto app = std::make_unique<ControlledApp::Impl>();
+        app->process = std::move(process);
         app->child = child;
         app->process_group = child;
         app->session = std::move(session);
@@ -450,27 +404,43 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
         return ControlledApp(std::move(app));
     };
 
-    // 1) Native Wayland first; fall back to an authenticated XWayland bridge.
-    if (auto native = attempt(false, "", "", nullptr); native) return native;
-    debug_trace(DebugCategory::Harness, "native Wayland failed, falling back to XWayland bridge");
-    if (impl_->fallback_timeout.count() <= 0) return code(errc::native_wayland_timeout);
-
-    auto bridge = std::make_unique<XwaylandBridge>();
-    if (!bridge->start(impl_->socket_name, 5)) {
-        debug_trace(DebugCategory::Harness, "XWayland bridge start failed");
-        return code(errc::xwayland_bridge_failed);
+    // The launch order is a strategy contract; each strategy still delegates
+    // fork/exec/wait to ProcessHost via `attempt`.
+    std::error_code last_error = code(errc::native_wayland_timeout);
+    for (const auto &strategy : launch_strategies()) {
+        if (!strategy.available()) continue;
+        switch (strategy.kind()) {
+            case LaunchKind::NativeWayland: {
+                auto native = attempt(false, "", "", nullptr);
+                if (native) return native;
+                last_error = native.error();
+                debug_trace(DebugCategory::Harness, "native Wayland failed, trying next launch strategy");
+                break;
+            }
+            case LaunchKind::XWayland: {
+                if (impl_->fallback_timeout.count() <= 0) continue;
+                auto bridge = std::make_unique<XwaylandBridge>();
+                if (!bridge->start(impl_->socket_name, 5)) {
+                    debug_trace(DebugCategory::Harness, "XWayland bridge start failed");
+                    last_error = code(errc::xwayland_bridge_failed);
+                    continue;
+                }
+                // Copy strings before moving the bridge: argument evaluation
+                // order is unspecified.
+                const std::string x11_display = bridge->display();
+                const std::string x11_xauthority = bridge->xauthority();
+                debug_trace(DebugCategory::Harness, fmt::format("XWayland bridge display={}", x11_display));
+                auto fallback = attempt(true, x11_display, x11_xauthority, std::move(bridge));
+                if (fallback) return fallback;
+                last_error = fallback.error();
+                debug_trace(DebugCategory::Harness, "XWayland fallback failed");
+                break;
+            }
+            case LaunchKind::Custom:
+            case LaunchKind::Unknown: break;
+        }
     }
-    // Copy the strings before moving the bridge: argument evaluation order is
-    // unspecified, so `bridge->display()` could otherwise run after the move.
-    const std::string x11_display = bridge->display();
-    const std::string x11_xauthority = bridge->xauthority();
-    debug_trace(DebugCategory::Harness, fmt::format("XWayland bridge display={}", x11_display));
-    auto fallback = attempt(true, x11_display, x11_xauthority, std::move(bridge));
-    if (!fallback) {
-        debug_trace(DebugCategory::Harness, "XWayland fallback failed");
-        return code(errc::xwayland_bridge_failed);
-    }
-    return fallback;
+    return last_error;
 }
 
 }   // namespace skl::wcas

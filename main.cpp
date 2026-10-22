@@ -21,7 +21,7 @@ int main(int argc, char **argv) {
     }
     auto frame = app.value().capture();
     if (frame)
-        cv::imwrite("wcas-capture.png", frame.value().image);
+        cv::imwrite("wcas-capture.png", frame.value());
     else
         fmt::println(stderr, "[{}] {}", frame.error(), frame.error().message());
     return 0;

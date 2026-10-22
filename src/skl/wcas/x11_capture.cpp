@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <cstdlib>
 #include <unordered_map>
 #include <utility>
@@ -124,6 +125,66 @@ cv::Mat capture_window(xcb_connection_t *connection, xcb_window_t window) {
     return result;
 }
 
+
+std::string interned_string_property(
+    xcb_connection_t *connection, xcb_window_t window, const char *name, xcb_atom_t type) {
+    auto *atom_reply =
+        xcb_intern_atom_reply(connection, xcb_intern_atom(connection, 0, std::strlen(name), name), nullptr);
+    if (atom_reply == nullptr) return {};
+    const xcb_atom_t atom = atom_reply->atom;
+    std::free(atom_reply);
+
+    auto *property =
+        xcb_get_property_reply(connection, xcb_get_property(connection, 0, window, atom, type, 0, 1'024), nullptr);
+    if (property == nullptr) return {};
+    std::string value;
+    if (property->format == 8 && xcb_get_property_value_length(property) > 0) {
+        const auto *data = static_cast<const char *>(xcb_get_property_value(property));
+        value.assign(data, static_cast<std::size_t>(xcb_get_property_value_length(property)));
+    }
+    std::free(property);
+    return value;
+}
+
+std::string window_title(xcb_connection_t *connection, xcb_window_t window) {
+    auto title = interned_string_property(connection, window, "_NET_WM_NAME", XCB_ATOM_ANY);
+    if (!title.empty()) return title;
+    return interned_string_property(connection, window, "WM_NAME", XCB_ATOM_STRING);
+}
+
+std::string window_class(xcb_connection_t *connection, xcb_window_t window) {
+    auto *property = xcb_get_property_reply(
+        connection, xcb_get_property(connection, 0, window, XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 0, 1'024), nullptr);
+    if (property == nullptr) return {};
+    std::string value;
+    if (property->format == 8 && xcb_get_property_value_length(property) > 0) {
+        const auto *data = static_cast<const char *>(xcb_get_property_value(property));
+        const std::size_t length = static_cast<std::size_t>(xcb_get_property_value_length(property));
+        const std::size_t first = std::string(data, length).find('\0');
+        if (first != std::string::npos && first + 1 < length) {
+            const std::size_t end = std::string(data + first + 1, length - first - 1).find('\0');
+            value.assign(data + first + 1, end == std::string::npos ? length - first - 1 : end);
+        }
+    }
+    std::free(property);
+    return value;
+}
+
+std::uint32_t window_pid(xcb_connection_t *connection, xcb_window_t window) {
+    auto *atom_reply = xcb_intern_atom_reply(connection, xcb_intern_atom(connection, 0, 12, "_NET_WM_PID"), nullptr);
+    if (atom_reply == nullptr) return 0;
+    const xcb_atom_t atom = atom_reply->atom;
+    std::free(atom_reply);
+    auto *property = xcb_get_property_reply(
+        connection, xcb_get_property(connection, 0, window, atom, XCB_ATOM_CARDINAL, 0, 1), nullptr);
+    if (property == nullptr) return 0;
+    std::uint32_t pid = 0;
+    if (property->format == 32 && xcb_get_property_value_length(property) >= 4)
+        pid = *static_cast<const std::uint32_t *>(xcb_get_property_value(property));
+    std::free(property);
+    return pid;
+}
+
 }   // namespace
 
 bool x11_frame_has_visible_content(const cv::Mat &image) {
@@ -149,6 +210,53 @@ bool x11_frame_has_visible_content(const cv::Mat &image) {
         max_count = std::max(max_count, count);
     const double non_dominant = 1.0 - static_cast<double>(max_count) / static_cast<double>(sampled);
     return non_dominant > blank_threshold;
+}
+
+
+auto list_x11_windows(const std::string &display, const std::string &xauthority) -> result<std::vector<WindowInfo>> {
+    XcbHandle handle(display, xauthority);
+    if (handle.connection == nullptr)
+        return boost::outcome_v2::failure(std::make_error_code(std::errc::connection_refused));
+    xcb_connection_t *connection = handle.connection;
+
+    const xcb_setup_t *setup = xcb_get_setup(connection);
+    xcb_screen_t *screen = xcb_setup_roots_iterator(setup).data;
+    if (screen == nullptr) return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+
+    std::vector<WindowInfo> windows;
+    if (auto *tree = xcb_query_tree_reply(connection, xcb_query_tree(connection, screen->root), nullptr)) {
+        const int count = xcb_query_tree_children_length(tree);
+        xcb_window_t *children = xcb_query_tree_children(tree);
+        for (int i = 0; i < count; ++i) {
+            auto *attributes = xcb_get_window_attributes_reply(
+                connection, xcb_get_window_attributes(connection, children[i]), nullptr);
+            if (attributes == nullptr) continue;
+            const bool viewable = attributes->map_state == XCB_MAP_STATE_VIEWABLE;
+            std::free(attributes);
+            if (!viewable) continue;
+
+            auto *geometry = xcb_get_geometry_reply(connection, xcb_get_geometry(connection, children[i]), nullptr);
+            if (geometry == nullptr) continue;
+            if (geometry->width <= 0 || geometry->height <= 0) {
+                std::free(geometry);
+                continue;
+            }
+            WindowInfo info;
+            info.app_id = window_class(connection, children[i]);
+            info.title = window_title(connection, children[i]);
+            info.width = geometry->width;
+            info.height = geometry->height;
+            info.pid = static_cast<int32_t>(window_pid(connection, children[i]));
+            info.selected = false;
+            info.origin = WindowOrigin::Toplevel;
+            info.surface_id = children[i];
+            info.target = TargetId{children[i], TargetKind::X11Window};
+            std::free(geometry);
+            windows.push_back(std::move(info));
+        }
+        std::free(tree);
+    }
+    return boost::outcome_v2::success(std::move(windows));
 }
 
 auto capture_x11_window(const std::string &display, const std::string &xauthority) -> result<cv::Mat> {

@@ -18,7 +18,7 @@ namespace {
 
 /// Run a command and capture its stdout. Returns nullopt when the tool is
 /// missing or exits non-zero, so callers can fall through to the next method.
-std::optional<std::string> run_capture(const std::string &command) {
+optional<std::string> run_capture(const std::string &command) {
     std::array<char, 4'096> buffer{};
     std::string output;
     FILE *pipe = ::popen(command.c_str(), "r");
@@ -46,7 +46,7 @@ cv::Mat decode_png_file(const std::string &path) {
 
 }   // namespace
 
-std::optional<Rect::value_type> extract(std::string_view str, std::string_view key) {
+optional<Rect::value_type> extract(std::string_view str, std::string_view key) {
     const std::string pattern = "\"" + std::string(key) + "\": ";
     const auto start = str.find(pattern);
     if (start == std::string_view::npos) return std::nullopt;
@@ -60,7 +60,7 @@ std::optional<Rect::value_type> extract(std::string_view str, std::string_view k
     }
 }
 
-std::optional<Rect> parse(std::string_view str) {
+optional<Rect> parse(std::string_view str) {
     const auto x = extract(str, "x");
     const auto y = extract(str, "y");
     const auto width = extract(str, "width");
@@ -69,8 +69,8 @@ std::optional<Rect> parse(std::string_view str) {
     return Rect(*x, *y, *width, *height);
 }
 
-std::optional<Rect> parse_xdotool(std::string_view &str) {
-    auto read = [&str](std::string_view key) -> std::optional<int> {
+optional<Rect> parse_xdotool(std::string_view &str) {
+    auto read = [&str](std::string_view key) -> optional<int> {
         const auto at = str.find(key);
         if (at == std::string_view::npos) return std::nullopt;
         auto rest = str.substr(at + key.size());
@@ -90,7 +90,7 @@ std::optional<Rect> parse_xdotool(std::string_view &str) {
     return Rect(*x, *y, *width, *height);
 }
 
-auto read_pid_children(pid_t pid) -> std::optional<std::vector<pid_t>> {
+auto read_pid_children(pid_t pid) -> optional<std::vector<pid_t>> {
     namespace fs = boost::filesystem;
     std::vector<pid_t> children;
 
@@ -163,7 +163,7 @@ auto collect_descendant(pid_t pid) -> std::vector<decltype(pid)> {
     return result;
 }
 
-auto from_swaymsg(pid_t pid) -> std::optional<Rect> {
+auto from_swaymsg(pid_t pid) -> optional<Rect> {
     const auto output = run_capture("swaymsg -t get_tree 2>/dev/null");
     if (!output) return std::nullopt;
     const std::string marker = "\"pid\": " + std::to_string(pid);
@@ -179,9 +179,9 @@ auto from_swaymsg(pid_t pid) -> std::optional<Rect> {
     return std::nullopt;
 }
 
-auto from_swaytree(pid_t pid) -> std::optional<Rect> { return from_swaymsg(pid); }
+auto from_swaytree(pid_t pid) -> optional<Rect> { return from_swaymsg(pid); }
 
-auto from_hyprctl(pid_t pid) -> std::optional<Rect> {
+auto from_hyprctl(pid_t pid) -> optional<Rect> {
     const auto output = run_capture("hyprctl clients -j 2>/dev/null");
     if (!output) return std::nullopt;
     const std::string marker = "\"pid\": " + std::to_string(pid);
@@ -227,7 +227,7 @@ auto from_hyprctl(pid_t pid) -> std::optional<Rect> {
     return std::nullopt;
 }
 
-auto from_xdotool(pid_t pid) -> std::optional<Rect> {
+auto from_xdotool(pid_t pid) -> optional<Rect> {
     const auto windows = run_capture("xdotool search --pid " + std::to_string(pid) + " 2>/dev/null");
     if (!windows) return std::nullopt;
     std::string current;
@@ -249,7 +249,7 @@ auto from_xdotool(pid_t pid) -> std::optional<Rect> {
     return std::nullopt;
 }
 
-auto find_window(pid_t pid) -> std::optional<Rect> {
+auto find_window(pid_t pid) -> optional<Rect> {
     for (const auto candidate : collect_descendant(pid)) {
         if (auto rect = from_swaymsg(candidate)) return rect;
         if (auto rect = from_hyprctl(candidate)) return rect;
@@ -258,8 +258,8 @@ auto find_window(pid_t pid) -> std::optional<Rect> {
     return std::nullopt;
 }
 
-auto from_swaytree_by_size_and_title(std::string_view json, Size size, std::optional<std::string_view> title)
-    -> std::optional<Rect> {
+auto from_swaytree_by_size_and_title(std::string_view json, Size size, optional<std::string_view> title)
+    -> optional<Rect> {
     std::size_t search_from = 0;
     while (true) {
         const auto rect_at = json.find("\"rect\"", search_from);
@@ -294,12 +294,12 @@ auto from_swaytree_by_size_and_title(std::string_view json, Size size, std::opti
     }
 }
 
-auto from_swaymsg_by_size_and_title(std::string_view json, Size size, std::optional<std::string_view> title)
-    -> std::optional<Rect> {
+auto from_swaymsg_by_size_and_title(std::string_view json, Size size, optional<std::string_view> title)
+    -> optional<Rect> {
     return from_swaytree_by_size_and_title(json, size, title);
 }
 
-auto from_hyprctl_by_size_and_title(Size size, std::optional<std::string_view> title) -> std::optional<Rect> {
+auto from_hyprctl_by_size_and_title(Size size, optional<std::string_view> title) -> optional<Rect> {
     const auto output = run_capture("hyprctl clients -j 2>/dev/null");
     if (!output) return std::nullopt;
     std::string_view json(*output);
@@ -362,7 +362,7 @@ auto from_hyprctl_by_size_and_title(Size size, std::optional<std::string_view> t
     }
 }
 
-auto from_xdotool_by_size_and_title(Size size, std::optional<std::string_view> title) -> std::optional<Rect> {
+auto from_xdotool_by_size_and_title(Size size, optional<std::string_view> title) -> optional<Rect> {
     const auto output = run_capture("xdotool getactivewindow getwindowgeometry --shell 2>/dev/null");
     if (!output) return std::nullopt;
     std::string_view view(*output);
@@ -380,7 +380,7 @@ auto from_xdotool_by_size_and_title(Size size, std::optional<std::string_view> t
     return rect;
 }
 
-auto find_window_position_by_size_and_title(Size size, std::optional<std::string_view> title) -> std::optional<Rect> {
+auto find_window_position_by_size_and_title(Size size, optional<std::string_view> title) -> optional<Rect> {
     if (const auto output = run_capture("swaymsg -t get_tree 2>/dev/null")) {
         if (auto rect = from_swaytree_by_size_and_title(*output, size, title)) return rect;
     }
@@ -395,7 +395,7 @@ auto find_window_position_by_size_and_title(Size size, std::optional<std::string
 // Compositor screenshot fallbacks
 // ---------------------------------------------------------------------------
 
-auto capture_via_grim(std::optional<Rect> rect) -> result<cv::Mat> {
+auto capture_via_grim(optional<Rect> rect) -> result<cv::Mat> {
     const auto path = capture_temp_path();
     std::string command = "grim -t png";
     if (rect.has_value()) command += fmt::format("-g {},{} {}x{}", rect->x, rect->y, rect->width, rect->height);
@@ -429,7 +429,7 @@ auto capture_gnome_screenshot() -> result<cv::Mat> {
 }
 
 auto capture_compositor_screen(uint32_t pid) -> result<cv::Mat> {
-    std::optional<Rect> geometry;
+    optional<Rect> geometry;
     if (pid != 0) geometry = find_window(static_cast<pid_t>(pid));
     if (auto frame = capture_via_grim(geometry); frame.has_value()) return frame;
     if (auto frame = capture_via_spectacle(); frame.has_value()) return frame;
@@ -468,7 +468,7 @@ cv::Mat decode_kms_frame(const drmtap_frame_info &frame) {
 
 }   // namespace
 
-auto capture_kms_screen(std::optional<Rect> crop) -> result<cv::Mat> {
+auto capture_kms_screen(optional<Rect> crop) -> result<cv::Mat> {
     // libdrmtap handles GPU tiling and vendor modifiers, returning linear
     // pixels. Without CAP_SYS_ADMIN (or a configured helper) this fails, and
     // the caller falls through to another capture backend.

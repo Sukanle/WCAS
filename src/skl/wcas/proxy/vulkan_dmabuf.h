@@ -1,4 +1,5 @@
 #pragma once
+#include "skl/wcas/types.h"
 
 #include <cstdint>
 #include <optional>
@@ -31,7 +32,7 @@ bool vulkan_dmabuf_available();
 /// Vulkan, unsupported format, driver rejects the modifier) so callers can
 /// fall back to a linear mmap. This is the only path that can read tiled or
 /// otherwise non-mappable buffers.
-std::optional<VulkanFrame> vulkan_import_dmabuf(int fd, std::uint32_t width, std::uint32_t height, std::uint32_t stride,
+optional<VulkanFrame> vulkan_import_dmabuf(int fd, std::uint32_t width, std::uint32_t height, std::uint32_t stride,
     std::uint64_t modifier, std::uint32_t fourcc, std::uint32_t plane_offset);
 
 /// Export the producer fence of a DMA-BUF as a sync fd. Returns -1 when the

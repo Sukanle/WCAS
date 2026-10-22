@@ -62,7 +62,7 @@ bool CaptureSlot::check_timeout() {
     return true;
 }
 
-std::optional<cv::Mat> CaptureSlot::take_result() {
+optional<cv::Mat> CaptureSlot::take_result() {
     if (state_ != CaptureState::CpuProcessing) return std::nullopt;
     auto result = std::move(result_);
     result_.reset();

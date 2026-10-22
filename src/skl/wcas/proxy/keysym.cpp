@@ -21,7 +21,7 @@ std::string lowered(std::string value) {
 
 }   // namespace
 
-std::optional<std::uint32_t> keysym_for_key(const std::string &name) {
+optional<std::uint32_t> keysym_for_key(const std::string &name) {
     const auto text = trimmed(name);
     if (text.empty()) return std::nullopt;
 

@@ -1,4 +1,5 @@
 #pragma once
+#include "skl/wcas/types.h"
 
 #include <chrono>
 #include <cstdint>
@@ -122,7 +123,7 @@ public:
     bool submit();
     /// Reset a slot stuck in WaitingProducer/Submitted for too long.
     bool check_timeout();
-    std::optional<cv::Mat> take_result();
+    optional<cv::Mat> take_result();
     void reset();
 
 private:
@@ -130,9 +131,9 @@ private:
 
     int index_ = 0;
     CaptureState state_ = CaptureState::Free;
-    std::optional<CaptureJob> job_;
+    optional<CaptureJob> job_;
     int sync_fd_ = -1;
-    std::optional<cv::Mat> result_;
+    optional<cv::Mat> result_;
     std::chrono::steady_clock::time_point tick_start_{};
 };
 

@@ -1,6 +1,10 @@
 #include "vulkan_dmabuf.h"
 
+#include "dmabuf_decoder.h"
+
 #include "egl_dmabuf.h"
+
+#include "skl/wcas/error.h"
 
 #include <vulkan/vulkan.h>
 
@@ -340,7 +344,7 @@ void trace_capture(std::string message) {
 
 bool vulkan_dmabuf_available() { return global_device().valid; }
 
-std::optional<VulkanFrame> vulkan_import_dmabuf(int fd, std::uint32_t width, std::uint32_t height, std::uint32_t stride,
+optional<VulkanFrame> vulkan_import_dmabuf(int fd, std::uint32_t width, std::uint32_t height, std::uint32_t stride,
     std::uint64_t modifier, std::uint32_t fourcc, std::uint32_t plane_offset) {
     auto &d = global_device();
     // Every rejection below is silent by design, which makes "GPU import failed"
@@ -706,7 +710,7 @@ int export_dmabuf_sync_file(int dmabuf_fd, bool *active) {
 namespace {
 
 /// Which decoder handles a DMA-BUF.
-enum class CaptureBackend {
+enum class CaptureKind {
     Auto,
     Vulkan,
     Egl
@@ -714,15 +718,15 @@ enum class CaptureBackend {
 
 /// `WCAS_DMABUF_BACKEND=auto|vulkan|egl`, parsed once. `auto` picks the backend
 /// whose decoder the device actually supports for the buffer's layout.
-CaptureBackend capture_backend() {
-    static const CaptureBackend backend = [] {
+CaptureKind capture_backend() {
+    static const CaptureKind backend = [] {
         const char *value = ::getenv("WCAS_DMABUF_BACKEND");
-        if (value == nullptr) return CaptureBackend::Auto;
+        if (value == nullptr) return CaptureKind::Auto;
         const std::string spec = value;
-        if (spec == "vulkan") return CaptureBackend::Vulkan;
-        if (spec == "egl") return CaptureBackend::Egl;
+        if (spec == "vulkan") return CaptureKind::Vulkan;
+        if (spec == "egl") return CaptureKind::Egl;
         if (spec != "auto") trace_capture(fmt::format("unknown WCAS_DMABUF_BACKEND='{}', using auto", spec));
-        return CaptureBackend::Auto;
+        return CaptureKind::Auto;
     }();
     return backend;
 }
@@ -745,137 +749,272 @@ bool capture_timing_enabled() {
     return enabled;
 }
 
+using skl::abix::poly::InterfaceMethod;
+using skl::abix::poly::InterfaceRegistry;
+using skl::abix::poly::InterfaceStatus;
+
+std::error_code decoder_error(errc value) { return make_error_code(value); }
+
+std::string describe_dmabuf(const DmaBufDescriptor &descriptor) {
+    return fmt::format("{}x{} fourcc=0x{:08x} modifier=0x{:016x} stride={} offset={}", descriptor.width,
+        descriptor.height, descriptor.format, descriptor.modifier, descriptor.stride, descriptor.offset);
+}
+
+const char *decoder_name(DmaBufDecoderKind kind) {
+    switch (kind) {
+        case DmaBufDecoderKind::Auto:    return "auto";
+        case DmaBufDecoderKind::Vulkan:  return "vulkan";
+        case DmaBufDecoderKind::Egl:     return "egl";
+        case DmaBufDecoderKind::Mmap:    return "cpu";
+        case DmaBufDecoderKind::Unknown: break;
+    }
+    return "unknown";
+}
+
+class VulkanDecoder {
+public:
+    std::string name() const { return "vulkan"; }
+    DmaBufDecoderKind kind() const { return DmaBufDecoderKind::Vulkan; }
+    bool available() const { return vulkan_dmabuf_available(); }
+    bool supports(std::uint32_t fourcc, std::uint64_t modifier) const {
+        return fourcc_to_vk(fourcc) != VK_FORMAT_UNDEFINED
+            && (modifier_is_linear(modifier) || vulkan_modifier_supported(fourcc, modifier));
+    }
+
+    result<DmaBufDecoded> decode(const DmaBufDescriptor *descriptor) const {
+        if (descriptor == nullptr || descriptor->fd < 0 || descriptor->width <= 0 || descriptor->height <= 0)
+            return decoder_error(errc::frame_capture_failed);
+        if (!vulkan_dmabuf_available()) return decoder_error(errc::feature_not_implemented);
+        auto gpu = vulkan_import_dmabuf(descriptor->fd, static_cast<std::uint32_t>(descriptor->width),
+            static_cast<std::uint32_t>(descriptor->height), descriptor->stride, descriptor->modifier,
+            descriptor->format, descriptor->offset);
+        if (!gpu.has_value()) {
+            trace_capture(fmt::format("{} | GPU import failed", describe_dmabuf(*descriptor)));
+            return decoder_error(errc::frame_capture_failed);
+        }
+        cv::Mat image;
+        if (!decode_plane(gpu->pixels.data(), gpu->pixels.size(), descriptor->width, descriptor->height,
+                static_cast<std::uint32_t>(descriptor->width) * 4, descriptor->format, 0, image)) {
+            trace_capture(fmt::format("{} | GPU readback rejected by decode_plane", describe_dmabuf(*descriptor)));
+            return decoder_error(errc::frame_capture_failed);
+        }
+        trace_capture(fmt::format("{} | GPU transfer readback | modifier_supported={} | pixels=unverified",
+            describe_dmabuf(*descriptor), gpu->modifier_supported ? "yes" : "NO"));
+        return DmaBufDecoded{std::move(image), kind(), gpu->modifier_supported};
+    }
+};
+
+class EglDecoder {
+public:
+    std::string name() const { return "egl"; }
+    DmaBufDecoderKind kind() const { return DmaBufDecoderKind::Egl; }
+    bool available() const { return egl_dmabuf_available(); }
+    bool supports(std::uint32_t fourcc, std::uint64_t modifier) const {
+        return egl_dmabuf_available() && egl_dmabuf_import_supported(fourcc, modifier);
+    }
+
+    result<DmaBufDecoded> decode(const DmaBufDescriptor *descriptor) const {
+        if (descriptor == nullptr || descriptor->fd < 0 || descriptor->width <= 0 || descriptor->height <= 0)
+            return decoder_error(errc::frame_capture_failed);
+        if (!egl_dmabuf_available()) return decoder_error(errc::feature_not_implemented);
+        auto pixels = egl_read_dmabuf(descriptor->fd, static_cast<std::uint32_t>(descriptor->width),
+            static_cast<std::uint32_t>(descriptor->height), descriptor->stride, descriptor->modifier,
+            descriptor->format, descriptor->offset);
+        if (!pixels.has_value()) {
+            trace_capture(fmt::format("{} | EGL readback failed", describe_dmabuf(*descriptor)));
+            return decoder_error(errc::frame_capture_failed);
+        }
+        const std::uint32_t rgba_format =
+            (descriptor->format == drm_argb8888 || descriptor->format == drm_abgr8888) ? drm_abgr8888 : drm_xbgr8888;
+        cv::Mat image;
+        if (!decode_plane(pixels->data(), pixels->size(), descriptor->width, descriptor->height,
+                static_cast<std::uint32_t>(descriptor->width) * 4, rgba_format, 0, image)) {
+            trace_capture(fmt::format("{} | EGL readback rejected by decode_plane", describe_dmabuf(*descriptor)));
+            return decoder_error(errc::frame_capture_failed);
+        }
+        trace_capture(fmt::format("{} | EGL readback | pixels=rgba logical", describe_dmabuf(*descriptor)));
+        return DmaBufDecoded{std::move(image), kind(), true};
+    }
+};
+
+class MmapDecoder {
+public:
+    std::string name() const { return "mmap"; }
+    DmaBufDecoderKind kind() const { return DmaBufDecoderKind::Mmap; }
+    bool available() const { return true; }
+    bool supports(std::uint32_t, std::uint64_t modifier) const { return modifier_is_linear(modifier); }
+
+    result<DmaBufDecoded> decode(const DmaBufDescriptor *descriptor) const {
+        if (descriptor == nullptr || descriptor->fd < 0 || descriptor->width <= 0 || descriptor->height <= 0)
+            return decoder_error(errc::frame_capture_failed);
+        if (!modifier_is_linear(descriptor->modifier)) return decoder_error(errc::feature_not_implemented);
+        const auto map_size =
+            static_cast<std::size_t>(descriptor->offset)
+            + static_cast<std::size_t>(descriptor->stride) * static_cast<std::size_t>(descriptor->height);
+        if (map_size == 0) return decoder_error(errc::frame_capture_failed);
+
+        const bool synced = dma_buf_sync_ioctl(descriptor->fd, dma_buf_sync_read | dma_buf_sync_start);
+        void *mapped = ::mmap(nullptr, map_size, PROT_READ, MAP_SHARED, descriptor->fd, 0);
+        if (mapped == MAP_FAILED) {
+            if (synced) dma_buf_sync_ioctl(descriptor->fd, dma_buf_sync_read | dma_buf_sync_end);
+            trace_capture(fmt::format("mmap of {} bytes failed: {}", map_size, describe_dmabuf(*descriptor)));
+            return decoder_error(errc::frame_capture_failed);
+        }
+        cv::Mat image;
+        const bool ok = decode_plane(static_cast<const unsigned char *>(mapped), map_size, descriptor->width,
+            descriptor->height, descriptor->stride, descriptor->format, descriptor->offset, image);
+        ::munmap(mapped, map_size);
+        if (synced) dma_buf_sync_ioctl(descriptor->fd, dma_buf_sync_read | dma_buf_sync_end);
+        if (!ok) {
+            trace_capture(fmt::format("{} | CPU decode rejected the buffer", describe_dmabuf(*descriptor)));
+            return decoder_error(errc::frame_capture_failed);
+        }
+        trace_capture(fmt::format("{} | OK via CPU mmap", describe_dmabuf(*descriptor)));
+        return DmaBufDecoded{std::move(image), kind(), true};
+    }
+};
+
+class AutoDecoder {
+public:
+    std::string name() const { return "auto"; }
+    DmaBufDecoderKind kind() const { return DmaBufDecoderKind::Auto; }
+    bool available() const { return true; }
+    bool supports(std::uint32_t fourcc, std::uint64_t modifier) const {
+        return mmap_.supports(fourcc, modifier)
+            || vulkan_.supports(fourcc, modifier)
+            || (egl_.available() && egl_.supports(fourcc, modifier));
+    }
+
+    result<DmaBufDecoded> decode(const DmaBufDescriptor *descriptor) const {
+        if (descriptor == nullptr) return decoder_error(errc::frame_capture_failed);
+
+        const auto mode = capture_backend();
+        const bool linear = modifier_is_linear(descriptor->modifier);
+        const bool vulkan_legal = mode == CaptureKind::Vulkan
+                               || (mode == CaptureKind::Auto
+                                   && (linear || vulkan_modifier_supported(descriptor->format, descriptor->modifier)));
+        const bool egl_selected = mode == CaptureKind::Egl
+                               || (mode == CaptureKind::Auto
+                                   && !vulkan_legal
+                                   && egl_.available()
+                                   && egl_.supports(descriptor->format, descriptor->modifier));
+
+        if (egl_selected) {
+            auto decoded = egl_.decode(descriptor);
+            if (decoded) return decoded;
+            if (mode == CaptureKind::Egl) return decoder_error(errc::frame_capture_failed);
+        }
+        if (vulkan_legal) {
+            auto decoded = vulkan_.decode(descriptor);
+            if (decoded) return decoded;
+        }
+        if (linear) {
+            auto decoded = mmap_.decode(descriptor);
+            if (decoded) return decoded;
+        }
+        trace_capture(fmt::format("{} | all DMA-BUF decoders failed", describe_dmabuf(*descriptor)));
+        return decoder_error(errc::frame_capture_failed);
+    }
+
+private:
+    VulkanDecoder vulkan_;
+    EglDecoder egl_;
+    MmapDecoder mmap_;
+};
+
+const InterfaceMethod kVulkanMethods[] = {
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, name, &VulkanDecoder::name),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, kind, &VulkanDecoder::kind),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, available, &VulkanDecoder::available),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, supports, &VulkanDecoder::supports),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, decode, &VulkanDecoder::decode),
+};
+const InterfaceMethod kEglMethods[] = {
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, name, &EglDecoder::name),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, kind, &EglDecoder::kind),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, available, &EglDecoder::available),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, supports, &EglDecoder::supports),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, decode, &EglDecoder::decode),
+};
+const InterfaceMethod kMmapMethods[] = {
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, name, &MmapDecoder::name),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, kind, &MmapDecoder::kind),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, available, &MmapDecoder::available),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, supports, &MmapDecoder::supports),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, decode, &MmapDecoder::decode),
+};
+const InterfaceMethod kAutoMethods[] = {
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, name, &AutoDecoder::name),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, kind, &AutoDecoder::kind),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, available, &AutoDecoder::available),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, supports, &AutoDecoder::supports),
+    SKL_ABIX_INTERFACE_MEMBER_ENTRY(DmaBufDecoderTraits, decode, &AutoDecoder::decode),
+};
+
+static_assert(std::size(kVulkanMethods) == DmaBufDecoderTraits::signatures.size());
+static_assert(std::size(kEglMethods) == DmaBufDecoderTraits::signatures.size());
+static_assert(std::size(kMmapMethods) == DmaBufDecoderTraits::signatures.size());
+static_assert(std::size(kAutoMethods) == DmaBufDecoderTraits::signatures.size());
+
+constexpr auto kVulkanType = skl::abix::model::canonical_type_id("skl::wcas::VulkanDmaBufDecoder");
+constexpr auto kEglType = skl::abix::model::canonical_type_id("skl::wcas::EglDmaBufDecoder");
+constexpr auto kMmapType = skl::abix::model::canonical_type_id("skl::wcas::MmapDmaBufDecoder");
+constexpr auto kAutoType = skl::abix::model::canonical_type_id("skl::wcas::AutoDmaBufDecoder");
+
+InterfaceStatus register_dmabuf_decoders(InterfaceRegistry<8> &registry) {
+    const auto add = [&](const auto &type, const InterfaceMethod *methods, std::size_t count) {
+        return registry.add({DmaBufDecoderTraits::id, type, methods, static_cast<std::uint32_t>(count),
+            DmaBufDecoderTraits::version, 0});
+    };
+    if (const auto status = add(kVulkanType, kVulkanMethods, std::size(kVulkanMethods)); status != InterfaceStatus::ok)
+        return status;
+    if (const auto status = add(kEglType, kEglMethods, std::size(kEglMethods)); status != InterfaceStatus::ok)
+        return status;
+    if (const auto status = add(kMmapType, kMmapMethods, std::size(kMmapMethods)); status != InterfaceStatus::ok)
+        return status;
+    return add(kAutoType, kAutoMethods, std::size(kAutoMethods));
+}
+
+struct DmaBufDecoderRegistry {
+    DmaBufDecoderRegistry() {
+        if (register_dmabuf_decoders(registry) != InterfaceStatus::ok) return;
+    }
+    InterfaceRegistry<8> registry;
+};
+
+const InterfaceRegistry<8> &dmabuf_decoder_registry() {
+    static const DmaBufDecoderRegistry holder;
+    return holder.registry;
+}
+
+const DmaBufDecoder &auto_decoder() {
+    static AutoDecoder provider;
+    static const DmaBufDecoder decoder(dmabuf_decoder_registry(), &provider, kAutoType);
+    return decoder;
+}
+
 }   // namespace
 
 bool capture_dmabuf_plane(int fd, std::int32_t width, std::int32_t height, std::uint32_t stride, std::uint64_t modifier,
     std::uint32_t format, std::uint32_t offset, cv::Mat &out) {
     if (fd < 0 || width <= 0 || height <= 0) return false;
+
+    DmaBufDescriptor descriptor{fd, width, height, stride, modifier, format, offset};
+    const auto &decoder = auto_decoder();
+    if (!decoder.valid()) return false;
+
     const auto capture_start = std::chrono::steady_clock::now();
-    const auto log_timing = [&](const char *backend) {
-        if (!capture_timing_enabled()) return;
+    auto decoded = decoder.decode(&descriptor);
+    if (!decoded) return false;
+
+    out = std::move(decoded.value().image);
+    if (capture_timing_enabled()) {
         const double ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - capture_start).count();
-        fmt::print(stderr, "[wcas] capture timing: backend={} {:.2f} ms {}x{}\n", backend, ms, width, height);
-    };
-
-    // Unconditional, not just on failure: a capture can "succeed" and still be
-    // wrong (a buffer read at the wrong stride decodes into garbage without any
-    // error being reported), so the descriptor has to be visible either way.
-    // `st_size` is compared against `offset + stride * height` below: if the
-    // mapping would run past the end of the object, the rows past that point are
-    // whatever happened to be mapped next.
-    off_t fd_size = -1;
-    struct stat fd_stat{};
-    if (::fstat(fd, &fd_stat) == 0) fd_size = fd_stat.st_size;
-    const auto needed =
-        static_cast<long long>(offset) + static_cast<long long>(stride) * static_cast<long long>(height);
-    const std::string descriptor = fmt::format(
-        "{}x{} fourcc=0x{:08x} modifier=0x{:016x} stride={} (w*4={}) offset={} fd_size={} need={} short_by={}", width,
-        height, format, modifier, stride, width * 4, offset, static_cast<long long>(fd_size), needed,
-        static_cast<long long>(fd_size) - needed);
-
-    // Backend selection. `auto` prefers a decoder the device actually supports
-    // for this layout; a compressed (c != 0) modifier is not importable through
-    // Vulkan at all, so those buffers go through EGL — the compositor's own
-    // path — instead.
-    const CaptureBackend backend = capture_backend();
-    const bool modifier_linear = modifier_is_linear(modifier);
-    const bool vulkan_legal = backend == CaptureBackend::Vulkan
-                           || (backend == CaptureBackend::Auto && modifier_linear)
-                           || (backend == CaptureBackend::Auto && vulkan_modifier_supported(format, modifier));
-
-    // EGL is the only route that decodes NVIDIA framebuffer-compressed buffers.
-    // In `auto` it is only chosen when EGL actually advertises this exact
-    // format+modifier, so an unsupported buffer falls through to a clear refusal
-    // instead of a doomed import attempt.
-    const bool egl_selected = backend == CaptureBackend::Egl
-                           || (backend == CaptureBackend::Auto
-                               && !vulkan_legal
-                               && egl_dmabuf_available()
-                               && egl_dmabuf_import_supported(format, modifier));
-    if (egl_selected) {
-        if (auto pixels = egl_read_dmabuf(fd, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height),
-                stride, modifier, format, offset)) {
-            // EGL readback is logical RGBA (bytes R,G,B,A), so decode through the
-            // R,G,B,A branch regardless of the source fourcc.
-            const std::uint32_t rgba_format =
-                (format == drm_argb8888 || format == drm_abgr8888) ? drm_abgr8888 : drm_xbgr8888;
-            if (decode_plane(pixels->data(), pixels->size(), width, height, static_cast<std::uint32_t>(width) * 4,
-                    rgba_format, 0, out)) {
-                trace_capture(fmt::format("{} | egl readback | pixels=rgba logical", descriptor));
-                log_timing("egl");
-                return true;
-            }
-            trace_capture(fmt::format("egl readback rejected by decode_plane: {}", descriptor));
-            return false;
-        }
-        trace_capture(fmt::format("egl backend could not read the buffer: {}", descriptor));
-        if (backend == CaptureBackend::Egl) return false;
-        // auto: fall through to the other backends below.
-    } else if (backend == CaptureBackend::Auto && !vulkan_legal && egl_dmabuf_available()) {
-        trace_capture(fmt::format("egl does not advertise this format/modifier for import: {}", descriptor));
+        fmt::print(stderr, "[wcas] capture timing: backend={} {:.2f} ms {}x{}\n", decoder_name(decoded.value().decoder),
+            ms, width, height);
     }
-
-    // The Vulkan transfer path. Only run it when it is legal for this layout
-    // (see `vulkan_legal`): importing an unsupported modifier "succeeds" but
-    // decodes the wrong bytes, which is worse than failing. The staging buffer
-    // comes back tightly packed, so decode it as a zero-offset plane.
-    if (vulkan_legal && vulkan_dmabuf_available()) {
-        if (auto gpu = vulkan_import_dmabuf(fd, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height),
-                stride, modifier, format, offset)) {
-            if (decode_plane(gpu->pixels.data(), gpu->pixels.size(), width, height,
-                    static_cast<std::uint32_t>(width) * 4, format, 0, out)) {
-                // The image was created and the copy decoded without error, but
-                // neither proves the pixels are right: the driver accepted a
-                // modifier it does not list as supported. Report the readback as
-                // unverified instead of "OK".
-                trace_capture(fmt::format("{} | GPU transfer readback | modifier_supported={} | pixels=unverified",
-                    descriptor, gpu->modifier_supported ? "yes" : "NO"));
-                log_timing("vulkan");
-                return true;
-            }
-            trace_capture(fmt::format("GPU readback rejected by decode_plane (unsupported fourcc): {}", descriptor));
-        } else
-            trace_capture(fmt::format("GPU import failed, considering CPU fallback: {}", descriptor));
-    } else if (!vulkan_legal)
-        trace_capture(fmt::format("vulkan backend skipped (modifier not importable for this layout): {}", descriptor));
-    else
-        trace_capture(fmt::format("no Vulkan device, considering CPU fallback: {}", descriptor));
-
-    // The mmap fallback walks rows of `stride` bytes and therefore only makes
-    // sense for a linear layout. Decoding a tiled/compressed buffer this way
-    // produced scrambled frames (colour blocks, misaligned rows) rather than an
-    // error, which is far worse than failing: the screenshot looked captured but
-    // was garbage. Without a working GPU import such a buffer is unreadable, so
-    // report it instead of mis-decoding it.
-    if (!modifier_is_linear(modifier)) {
-        trace_capture(fmt::format("refusing CPU decode of non-linear modifier without GPU import: {}", descriptor));
-        return false;
-    }
-
-    const auto map_size =
-        static_cast<std::size_t>(offset) + static_cast<std::size_t>(stride) * static_cast<std::size_t>(height);
-    if (map_size == 0) return false;
-
-    const bool synced = dma_buf_sync_ioctl(fd, dma_buf_sync_read | dma_buf_sync_start);
-
-    void *mapped = ::mmap(nullptr, map_size, PROT_READ, MAP_SHARED, fd, 0);
-    if (mapped == MAP_FAILED) {
-        if (synced) dma_buf_sync_ioctl(fd, dma_buf_sync_read | dma_buf_sync_end);
-        trace_capture(fmt::format("mmap of {} bytes failed: {}", map_size, descriptor));
-        return false;
-    }
-    const bool ok =
-        decode_plane(static_cast<const unsigned char *>(mapped), map_size, width, height, stride, format, offset, out);
-    ::munmap(mapped, map_size);
-    if (synced) dma_buf_sync_ioctl(fd, dma_buf_sync_read | dma_buf_sync_end);
-    if (!ok)
-        trace_capture(fmt::format("CPU decode rejected the buffer (format/stride mismatch): {}", descriptor));
-    else {
-        trace_capture(fmt::format("{} | OK via CPU mmap", descriptor));
-        log_timing("cpu");
-    }
-    return ok;
+    return true;
 }
 
 }   // namespace skl::wcas::proxy

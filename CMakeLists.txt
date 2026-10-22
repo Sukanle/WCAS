@@ -14,6 +14,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/ABIX)
+
 include(GNUInstallDirs)
 include(CTest)
 include(ExternalProject)
@@ -24,11 +26,11 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(WAYLAND REQUIRED IMPORTED_TARGET wayland-client wayland-server)
 pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
 pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb xcb-composite)
+pkg_check_modules(XTST IMPORTED_TARGET xtst x11)
 pkg_check_modules(VULKAN REQUIRED IMPORTED_TARGET vulkan)
 pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing)
-# Optional EGL/GBM backend: the only path that decodes NVIDIA framebuffer-
-# compressed DMA-BUFs (the compositor uses the same stack). Absent => the
-# backend compiles to a stub and capture stays on Vulkan.
+# Optional EGL/GBM backend: the only path that decodes NVIDIA framebuffer- compressed DMA-BUFs (the compositor uses the
+# same stack). Absent => the backend compiles to a stub and capture stays on Vulkan.
 pkg_check_modules(EGL IMPORTED_TARGET egl)
 pkg_check_modules(GLESV2 IMPORTED_TARGET glesv2)
 pkg_check_modules(GBM IMPORTED_TARGET gbm)
@@ -197,10 +199,21 @@ add_library(
     ${WCAS_WIRE_META_SOURCES}
     src/skl/wcas/harness/session.cpp
     src/skl/wcas/harness/computer_use.cpp
+    src/skl/wcas/harness/controller.cpp
+    src/skl/wcas/harness/process_host.cpp
+    src/skl/wcas/harness/focus_backend.cpp
+    src/skl/wcas/harness/launch_strategy.cpp
+    src/skl/wcas/harness/x11_input.cpp
+    src/skl/wcas/harness/health_monitor.cpp
+    src/skl/wcas/harness/target_selector.cpp
+    src/skl/wcas/harness/capture_source.cpp
+    src/skl/wcas/harness/window_source.cpp
+    src/skl/wcas/harness/frame_bus.cpp
     src/skl/wcas/harness/controlled_app.cpp)
 add_library(wcas::wcas ALIAS wcas)
 target_compile_definitions(wcas PRIVATE WCAS_BUILDING_LIBRARY=1)
 target_include_directories(wcas PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                                       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/ABIX>
                                        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_include_directories(
     wcas PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas/proxy
@@ -217,7 +230,13 @@ target_link_libraries(
             PkgConfig::LIBURING)
 target_link_libraries(wcas PRIVATE libdrmtap::drmtap)
 target_compile_definitions(wcas PRIVATE WCAS_HAVE_DRMTAP=1)
-if(EGL_FOUND AND GLESV2_FOUND AND GBM_FOUND)
+if(XTST_FOUND)
+    target_compile_definitions(wcas PRIVATE WCAS_HAVE_XTEST=1)
+    target_link_libraries(wcas PRIVATE PkgConfig::XTST)
+endif()
+if(EGL_FOUND
+   AND GLESV2_FOUND
+   AND GBM_FOUND)
     target_compile_definitions(wcas PRIVATE WCAS_HAVE_EGL=1)
     target_link_libraries(wcas PRIVATE PkgConfig::EGL PkgConfig::GLESV2 PkgConfig::GBM)
 endif()
@@ -226,10 +245,20 @@ set_property(
     APPEND
     PROPERTY BUILD_RPATH "${DRMTAP_BUILD_DIR}")
 
+# cmdly is the line editor behind the interactive console of the test harness.
+# Only its library is added: the submodule's top-level CMakeLists rewrites the
+# build-tree compile_commands.json, and its tests need googletest, so BUILD_TESTING
+# is shadowed to OFF for the duration of the add_subdirectory.
+set(_wcas_build_testing "${BUILD_TESTING}")
+set(BUILD_TESTING OFF)
+add_subdirectory(third_party/cmdly/libcmdly cmdly EXCLUDE_FROM_ALL)
+set(BUILD_TESTING "${_wcas_build_testing}")
+unset(_wcas_build_testing)
+
 add_executable(wcas-example main.cpp)
 target_link_libraries(wcas-example PRIVATE wcas::wcas)
-add_executable(wcas-test-7-functions test_7_functions.cpp)
-target_link_libraries(wcas-test-7-functions PRIVATE wcas::wcas Boost::program_options)
+add_executable(proton-inject proton-inject.cpp)
+target_link_libraries(proton-inject PRIVATE wcas::wcas Boost::program_options cmdly_static)
 if(BUILD_TESTING)
     add_executable(wcas-unit-tests tests/unit.cpp)
     target_link_libraries(wcas-unit-tests PRIVATE wcas::wcas)
@@ -277,7 +306,7 @@ if(BUILD_TESTING)
     target_compile_options(wcas-dmabuf-probe PRIVATE -UNDEBUG)
     add_test(NAME wcas-dmabuf-probe COMMAND wcas-dmabuf-probe)
     add_test(NAME wcas-cli-smoke COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_smoke.sh
-                                         $<TARGET_FILE:wcas-test-7-functions>)
+                                         $<TARGET_FILE:proton-inject>)
     add_executable(wcas-x11-capture tests/x11_capture.cpp)
     target_link_libraries(wcas-x11-capture PRIVATE wcas::wcas)
     target_include_directories(wcas-x11-capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
@@ -300,6 +329,9 @@ if(BUILD_TESTING)
 endif()
 install(TARGETS wcas LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(DIRECTORY include/skl DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+# controller.h exposes ABIX interface declarations, so consumers need ABIX's
+# header-only Interface/model/mics tree as well.
+install(DIRECTORY third_party/ABIX/ABIX third_party/ABIX/mics DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(
     DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libdrmtap-prefix/lib/"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}

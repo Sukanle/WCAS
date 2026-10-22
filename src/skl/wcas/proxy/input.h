@@ -85,7 +85,7 @@ KeyCombination parse_key_combination(const std::string &combination);
 
 /// XKB modifier name ("Shift", "Control", "Mod1", "Mod4") for an agent-facing
 /// modifier name. Returns std::nullopt for unknown names.
-std::optional<const char *> xkb_modifier_name(const std::string &name);
+optional<const char *> xkb_modifier_name(const std::string &name);
 
 /// Acquire and return the next serial number for input events.
 inline std::uint32_t next_serial(const std::shared_ptr<ConnState> &state) {
