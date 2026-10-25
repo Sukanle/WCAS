@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(
-    wcas
+    WCAS
     VERSION 0.1.0
     HOMEPAGE_URL "https://github.com/sukanle/WCAS"
     LANGUAGES CXX)
@@ -14,14 +14,25 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/ABIX)
-
 include(GNUInstallDirs)
 include(CTest)
 include(ExternalProject)
 find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc CONFIG)
 find_package(Boost REQUIRED COMPONENTS filesystem system program_options CONFIG)
 find_package(fmt REQUIRED)
+# ABIX is vendored so the runtime headers track the pinned submodule. 0.2.3's runtime-only mode builds just the
+# header-only ABIX::runtime target (plus MICS); it skips AMC, DLLs, tests and install rules, so no LLVM/Clang or
+# separate ABIX installation is needed. Packagers can opt into an installed package with -DWCAS_USE_SYSTEM_ABIX=ON.
+option(WCAS_USE_SYSTEM_ABIX "Use an installed ABIX CMake package instead of third_party/ABIX" OFF)
+if(WCAS_USE_SYSTEM_ABIX)
+    find_package(ABIX 0.2.3 CONFIG REQUIRED COMPONENTS runtime)
+else()
+    set(ABIX_BUILD_RUNTIME_ONLY ON)
+    set(ABIX_INSTALL OFF)
+    set(ABIX_INSTALL_BUNDLED_MICS OFF)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/ABIX ${CMAKE_CURRENT_BINARY_DIR}/third_party/ABIX
+                     EXCLUDE_FROM_ALL)
+endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WAYLAND REQUIRED IMPORTED_TARGET wayland-client wayland-server)
 pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
@@ -88,7 +99,7 @@ if(WAYLAND_CORE_XML AND WAYLAND_PROTOCOLS_DIR)
         NAMES wayland-server-protocol.h
         PATHS /usr/include /usr/local/include
         DOC "Directory holding wayland-server-protocol.h")
-    set(WCAS_WIRE_META_H "${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas/proxy/wire_meta.h")
+    set(WCAS_WIRE_META_H "${CMAKE_CURRENT_SOURCE_DIR}/include/SKL/WCAS/Private/Proxy/WireMeta.h")
     set(WCAS_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
     set(WCAS_EXT_WIRE_META_CPP "${WCAS_GENERATED_DIR}/wire_meta.cpp")
     add_custom_command(
@@ -180,47 +191,44 @@ set_target_properties(libdrmtap::drmtap PROPERTIES IMPORTED_LOCATION "${DRMTAP_L
 add_dependencies(libdrmtap::drmtap wcas-libdrmtap)
 
 add_library(
-    wcas SHARED
-    src/skl/wcas/error.cpp
-    src/skl/wcas/drm.cpp
-    src/skl/wcas/x11_capture.cpp
-    src/skl/wcas/dmabuf_probe.cpp
-    src/skl/wcas/xwayland.cpp
-    src/skl/wcas/proxy/conn.cpp
-    src/skl/wcas/proxy/input.cpp
-    src/skl/wcas/proxy/interfaces.cpp
-    src/skl/wcas/proxy/keymap.cpp
-    src/skl/wcas/proxy/keysym.cpp
-    src/skl/wcas/proxy/reactor.cpp
-    src/skl/wcas/proxy/capture_slot.cpp
-    src/skl/wcas/proxy/capture_scheduler.cpp
-    src/skl/wcas/proxy/vulkan_dmabuf.cpp
-    src/skl/wcas/proxy/egl_dmabuf.cpp
+    WCAS SHARED
+    src/SKL/WCAS/Error.cpp
+    src/SKL/WCAS/DRM.cpp
+    src/SKL/WCAS/DMABUF.cpp
+    src/SKL/WCAS/Private/X11Capture.cpp
+    src/SKL/WCAS/Private/XWayland.cpp
+    src/SKL/WCAS/Private/Proxy/Conn.cpp
+    src/SKL/WCAS/Private/Proxy/Input.cpp
+    src/SKL/WCAS/Private/Proxy/Interfaces.cpp
+    src/SKL/WCAS/Private/Proxy/Keymap.cpp
+    src/SKL/WCAS/Private/Proxy/Keysym.cpp
+    src/SKL/WCAS/Private/Proxy/Reactor.cpp
+    src/SKL/WCAS/Private/Proxy/CaptureSlot.cpp
+    src/SKL/WCAS/Private/Proxy/CaptureScheduler.cpp
+    src/SKL/WCAS/Private/Proxy/DMABUF/Vulkan.cpp
+    src/SKL/WCAS/Private/Proxy/DMABUF/EGL.cpp
     ${WCAS_WIRE_META_SOURCES}
-    src/skl/wcas/harness/session.cpp
-    src/skl/wcas/harness/computer_use.cpp
-    src/skl/wcas/harness/controller.cpp
-    src/skl/wcas/harness/process_host.cpp
-    src/skl/wcas/harness/focus_backend.cpp
-    src/skl/wcas/harness/launch_strategy.cpp
-    src/skl/wcas/harness/x11_input.cpp
-    src/skl/wcas/harness/health_monitor.cpp
-    src/skl/wcas/harness/target_selector.cpp
-    src/skl/wcas/harness/capture_source.cpp
-    src/skl/wcas/harness/window_source.cpp
-    src/skl/wcas/harness/frame_bus.cpp
-    src/skl/wcas/harness/controlled_app.cpp)
-add_library(wcas::wcas ALIAS wcas)
-target_compile_definitions(wcas PRIVATE WCAS_BUILDING_LIBRARY=1)
-target_include_directories(wcas PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-                                       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/ABIX>
+    src/SKL/WCAS/Private/Harness/Session.cpp
+    src/SKL/WCAS/Private/Harness/ComputerUse.cpp
+    src/SKL/WCAS/Private/Harness/Controller.cpp
+    src/SKL/WCAS/Private/Harness/ProcessHost.cpp
+    src/SKL/WCAS/Private/Harness/FocusBackend.cpp
+    src/SKL/WCAS/Private/Harness/LaunchStrategy.cpp
+    src/SKL/WCAS/Private/Harness/X11Input.cpp
+    src/SKL/WCAS/Private/Harness/HealthMonitor.cpp
+    src/SKL/WCAS/Private/Harness/TargetSelector.cpp
+    src/SKL/WCAS/Private/Harness/CaptureSource.cpp
+    src/SKL/WCAS/Private/Harness/WindowSource.cpp
+    src/SKL/WCAS/Private/Harness/FrameBus.cpp
+    src/SKL/WCAS/Private/Harness/ControlledApp.cpp)
+add_library(WCAS::WCAS ALIAS WCAS)
+target_compile_definitions(WCAS PRIVATE WCAS_BUILDING_LIBRARY=1)
+target_include_directories(WCAS PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                                        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-target_include_directories(
-    wcas PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas/proxy
-                 ${CMAKE_CURRENT_BINARY_DIR}/generated)
+target_include_directories(WCAS PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(
-    wcas
-    PUBLIC ${OpenCV_LIBS} fmt::fmt
+    WCAS
+    PUBLIC ${OpenCV_LIBS} fmt::fmt ABIX::runtime
     PRIVATE Boost::filesystem
             Boost::system
             PkgConfig::WAYLAND
@@ -228,27 +236,26 @@ target_link_libraries(
             PkgConfig::XCB
             PkgConfig::VULKAN
             PkgConfig::LIBURING)
-target_link_libraries(wcas PRIVATE libdrmtap::drmtap)
-target_compile_definitions(wcas PRIVATE WCAS_HAVE_DRMTAP=1)
+target_link_libraries(WCAS PRIVATE libdrmtap::drmtap)
+target_compile_definitions(WCAS PRIVATE WCAS_HAVE_DRMTAP=1)
 if(XTST_FOUND)
-    target_compile_definitions(wcas PRIVATE WCAS_HAVE_XTEST=1)
-    target_link_libraries(wcas PRIVATE PkgConfig::XTST)
+    target_compile_definitions(WCAS PRIVATE WCAS_HAVE_XTEST=1)
+    target_link_libraries(WCAS PRIVATE PkgConfig::XTST)
 endif()
 if(EGL_FOUND
    AND GLESV2_FOUND
    AND GBM_FOUND)
-    target_compile_definitions(wcas PRIVATE WCAS_HAVE_EGL=1)
-    target_link_libraries(wcas PRIVATE PkgConfig::EGL PkgConfig::GLESV2 PkgConfig::GBM)
+    target_compile_definitions(WCAS PRIVATE WCAS_HAVE_EGL=1)
+    target_link_libraries(WCAS PRIVATE PkgConfig::EGL PkgConfig::GLESV2 PkgConfig::GBM)
 endif()
 set_property(
-    TARGET wcas
+    TARGET WCAS
     APPEND
     PROPERTY BUILD_RPATH "${DRMTAP_BUILD_DIR}")
 
-# cmdly is the line editor behind the interactive console of the test harness.
-# Only its library is added: the submodule's top-level CMakeLists rewrites the
-# build-tree compile_commands.json, and its tests need googletest, so BUILD_TESTING
-# is shadowed to OFF for the duration of the add_subdirectory.
+# cmdly is the line editor behind the interactive console of the test harness. Only its library is added: the
+# submodule's top-level CMakeLists rewrites the build-tree compile_commands.json, and its tests need googletest, so
+# BUILD_TESTING is shadowed to OFF for the duration of the add_subdirectory.
 set(_wcas_build_testing "${BUILD_TESTING}")
 set(BUILD_TESTING OFF)
 add_subdirectory(third_party/cmdly/libcmdly cmdly EXCLUDE_FROM_ALL)
@@ -256,157 +263,68 @@ set(BUILD_TESTING "${_wcas_build_testing}")
 unset(_wcas_build_testing)
 
 add_executable(wcas-example main.cpp)
-target_link_libraries(wcas-example PRIVATE wcas::wcas)
+target_link_libraries(wcas-example PRIVATE WCAS::WCAS)
 add_executable(proton-inject proton-inject.cpp)
-target_link_libraries(proton-inject PRIVATE wcas::wcas Boost::program_options cmdly_static)
+target_link_libraries(proton-inject PRIVATE WCAS::WCAS Boost::program_options cmdly_static)
+
 if(BUILD_TESTING)
-    add_executable(wcas-unit-tests tests/unit.cpp)
-    target_link_libraries(wcas-unit-tests PRIVATE wcas::wcas)
-    target_include_directories(wcas-unit-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-unit-tests PRIVATE -UNDEBUG)
-    add_test(NAME wcas-unit-tests COMMAND wcas-unit-tests)
-    add_executable(wcas-controller-interface tests/controller_interface.cpp)
-    target_link_libraries(wcas-controller-interface PRIVATE wcas::wcas)
-    target_include_directories(wcas-controller-interface PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-controller-interface PRIVATE -UNDEBUG)
-    add_test(NAME wcas-controller-interface COMMAND wcas-controller-interface)
-    add_executable(wcas-capture-interface tests/capture_interface.cpp)
-    target_link_libraries(wcas-capture-interface PRIVATE wcas::wcas)
-    target_include_directories(wcas-capture-interface PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-capture-interface PRIVATE -UNDEBUG)
-    add_test(NAME wcas-capture-interface COMMAND wcas-capture-interface)
-    add_executable(wcas-window-interface tests/window_interface.cpp)
-    target_link_libraries(wcas-window-interface PRIVATE wcas::wcas)
-    target_include_directories(wcas-window-interface PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-window-interface PRIVATE -UNDEBUG)
-    add_test(NAME wcas-window-interface COMMAND wcas-window-interface)
-    add_executable(wcas-frame-bus tests/frame_bus.cpp)
-    target_link_libraries(wcas-frame-bus PRIVATE wcas::wcas)
-    target_include_directories(wcas-frame-bus PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-frame-bus PRIVATE -UNDEBUG)
-    add_test(NAME wcas-frame-bus COMMAND wcas-frame-bus)
-    add_executable(wcas-frame-pump tests/frame_pump.cpp)
-    target_link_libraries(wcas-frame-pump PRIVATE wcas::wcas)
-    target_include_directories(wcas-frame-pump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-frame-pump PRIVATE -UNDEBUG)
-    add_test(NAME wcas-frame-pump COMMAND wcas-frame-pump)
-    add_executable(wcas-dmabuf-decoder-interface tests/dmabuf_decoder.cpp)
-    target_link_libraries(wcas-dmabuf-decoder-interface PRIVATE wcas::wcas)
-    target_include_directories(wcas-dmabuf-decoder-interface PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-dmabuf-decoder-interface PRIVATE -UNDEBUG)
-    add_test(NAME wcas-dmabuf-decoder-interface COMMAND wcas-dmabuf-decoder-interface)
-    add_executable(wcas-process-host tests/process_host.cpp)
-    target_link_libraries(wcas-process-host PRIVATE wcas::wcas)
-    target_include_directories(wcas-process-host PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-process-host PRIVATE -UNDEBUG)
-    add_test(NAME wcas-process-host COMMAND wcas-process-host)
-    add_executable(wcas-focus-backend tests/focus_backend.cpp)
-    target_link_libraries(wcas-focus-backend PRIVATE wcas::wcas)
-    target_include_directories(wcas-focus-backend PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-focus-backend PRIVATE -UNDEBUG)
-    add_test(NAME wcas-focus-backend COMMAND wcas-focus-backend)
-    add_executable(wcas-health-monitor tests/health_monitor.cpp)
-    target_link_libraries(wcas-health-monitor PRIVATE wcas::wcas)
-    target_include_directories(wcas-health-monitor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-health-monitor PRIVATE -UNDEBUG)
-    add_test(NAME wcas-health-monitor COMMAND wcas-health-monitor)
-    add_executable(wcas-target-selector tests/target_selector.cpp)
-    target_link_libraries(wcas-target-selector PRIVATE wcas::wcas)
-    target_include_directories(wcas-target-selector PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-target-selector PRIVATE -UNDEBUG)
-    add_test(NAME wcas-target-selector COMMAND wcas-target-selector)
-    add_executable(wcas-transport-interface tests/transport_interface.cpp)
-    target_link_libraries(wcas-transport-interface PRIVATE wcas::wcas)
-    target_include_directories(wcas-transport-interface PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-transport-interface PRIVATE -UNDEBUG)
-    add_test(NAME wcas-transport-interface COMMAND wcas-transport-interface)
-    add_executable(wcas-x11-input tests/x11_input.cpp)
-    target_link_libraries(wcas-x11-input PRIVATE wcas::wcas)
-    target_include_directories(wcas-x11-input PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-x11-input PRIVATE -UNDEBUG)
-    add_test(NAME wcas-x11-input COMMAND wcas-x11-input)
-    add_executable(wcas-launch-strategy tests/launch_strategy.cpp)
-    target_link_libraries(wcas-launch-strategy PRIVATE wcas::wcas)
-    target_include_directories(wcas-launch-strategy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-launch-strategy PRIVATE -UNDEBUG)
-    add_test(NAME wcas-launch-strategy COMMAND wcas-launch-strategy)
-    add_executable(wcas-capture-runtime tests/capture_runtime.cpp)
-    target_link_libraries(wcas-capture-runtime PRIVATE wcas::wcas)
-    target_include_directories(wcas-capture-runtime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-capture-runtime PRIVATE -UNDEBUG)
-    add_test(NAME wcas-capture-runtime COMMAND wcas-capture-runtime)
-    add_executable(wcas-runtime-bindings tests/runtime_bindings.cpp)
-    target_link_libraries(wcas-runtime-bindings PRIVATE wcas::wcas)
-    target_include_directories(wcas-runtime-bindings PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-runtime-bindings PRIVATE -UNDEBUG)
-    add_test(NAME wcas-runtime-bindings COMMAND wcas-runtime-bindings)
-    add_executable(wcas-proxy-integration tests/proxy_integration.cpp)
-    target_link_libraries(wcas-proxy-integration PRIVATE wcas::wcas)
-    target_include_directories(wcas-proxy-integration PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-proxy-integration PRIVATE -UNDEBUG)
-    add_test(NAME wcas-proxy-integration COMMAND wcas-proxy-integration)
-    add_executable(wcas-input-injection tests/input_injection.cpp)
-    target_link_libraries(wcas-input-injection PRIVATE wcas::wcas PkgConfig::XKBCOMMON)
-    target_include_directories(wcas-input-injection PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-input-injection PRIVATE -UNDEBUG)
-    add_test(NAME wcas-input-injection COMMAND wcas-input-injection)
-    add_executable(wcas-dmabuf-capture tests/dmabuf_capture.cpp)
-    target_link_libraries(wcas-dmabuf-capture PRIVATE wcas::wcas)
-    target_include_directories(wcas-dmabuf-capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-dmabuf-capture PRIVATE -UNDEBUG)
-    add_test(NAME wcas-dmabuf-capture COMMAND wcas-dmabuf-capture)
-    add_executable(wcas-capture-scheduler tests/capture_scheduler.cpp)
-    target_link_libraries(wcas-capture-scheduler PRIVATE wcas::wcas)
-    target_include_directories(wcas-capture-scheduler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-capture-scheduler PRIVATE -UNDEBUG)
-    add_test(NAME wcas-capture-scheduler COMMAND wcas-capture-scheduler)
-    add_executable(wcas-capture-pipeline tests/capture_pipeline.cpp)
-    target_link_libraries(wcas-capture-pipeline PRIVATE wcas::wcas)
-    target_include_directories(wcas-capture-pipeline PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-capture-pipeline PRIVATE -UNDEBUG)
-    add_test(NAME wcas-capture-pipeline COMMAND wcas-capture-pipeline)
-    add_executable(wcas-window-geometry tests/window_geometry.cpp)
-    target_link_libraries(wcas-window-geometry PRIVATE wcas::wcas)
-    target_include_directories(wcas-window-geometry PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-window-geometry PRIVATE -UNDEBUG)
-    add_test(NAME wcas-window-geometry COMMAND wcas-window-geometry)
-    add_executable(wcas-kms-capture tests/kms_capture.cpp)
-    target_link_libraries(wcas-kms-capture PRIVATE wcas::wcas)
-    target_include_directories(wcas-kms-capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-kms-capture PRIVATE -UNDEBUG)
-    add_test(NAME wcas-kms-capture COMMAND wcas-kms-capture)
-    add_executable(wcas-dmabuf-probe tests/dmabuf_probe.cpp)
-    target_link_libraries(wcas-dmabuf-probe PRIVATE wcas::wcas)
-    target_include_directories(wcas-dmabuf-probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-dmabuf-probe PRIVATE -UNDEBUG)
-    add_test(NAME wcas-dmabuf-probe COMMAND wcas-dmabuf-probe)
-    add_test(NAME wcas-cli-smoke COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_smoke.sh
-                                         $<TARGET_FILE:proton-inject>)
-    add_executable(wcas-x11-capture tests/x11_capture.cpp)
-    target_link_libraries(wcas-x11-capture PRIVATE wcas::wcas)
-    target_include_directories(wcas-x11-capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-x11-capture PRIVATE -UNDEBUG)
-    add_test(NAME wcas-x11-capture COMMAND wcas-x11-capture)
-    add_executable(wcas-xwayland-bridge tests/xwayland_bridge.cpp)
-    target_link_libraries(wcas-xwayland-bridge PRIVATE wcas::wcas)
-    target_include_directories(wcas-xwayland-bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-xwayland-bridge PRIVATE -UNDEBUG)
-    add_test(NAME wcas-xwayland-bridge COMMAND wcas-xwayland-bridge)
-    add_executable(wcas-xwayland-fallback tests/xwayland_fallback.cpp)
-    target_link_libraries(wcas-xwayland-fallback PRIVATE wcas::wcas PkgConfig::WAYLAND)
-    target_include_directories(wcas-xwayland-fallback PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/skl/wcas)
-    target_compile_options(wcas-xwayland-fallback PRIVATE -UNDEBUG)
-    add_test(NAME wcas-xwayland-fallback COMMAND wcas-xwayland-fallback)
+    # 辅助函数：注册一个测试可执行文件并加入 CTest。 用法：wcas_add_test(<名称> <源文件> [LIBS <额外链接库>...]) <名称>     → target 名 = wcas-<名称>，测试名同样
+    # <源文件>   → 该测试的主源文件路径 LIBS ...   → 除 WCAS::WCAS 之外需要额外链接的库
+    function(wcas_add_test name source)
+        cmake_parse_arguments(TEST "" "" "LIBS" ${ARGN})
+
+        set(target "wcas-${name}")
+        add_executable(${target} ${source})
+        target_link_libraries(${target} PRIVATE WCAS::WCAS ${TEST_LIBS})
+        target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        target_compile_options(${target} PRIVATE -UNDEBUG)
+        add_test(NAME ${target} COMMAND ${target})
+    endfunction()
+
+    # ---- 常规单元/接口测试 ----
+    wcas_add_test(unit-tests tests/unit.cpp)
+    wcas_add_test(controller-interface tests/controller_interface.cpp)
+    wcas_add_test(capture-interface tests/capture_interface.cpp)
+    wcas_add_test(window-interface tests/window_interface.cpp)
+    wcas_add_test(frame-bus tests/frame_bus.cpp)
+    wcas_add_test(frame-pump tests/frame_pump.cpp)
+    wcas_add_test(dmabuf-decoder-interface tests/dmabuf_decoder.cpp)
+    wcas_add_test(process-host tests/process_host.cpp)
+    wcas_add_test(focus-backend tests/focus_backend.cpp)
+    wcas_add_test(health-monitor tests/health_monitor.cpp)
+    wcas_add_test(target-selector tests/target_selector.cpp)
+    wcas_add_test(transport-interface tests/transport_interface.cpp)
+    wcas_add_test(x11-input tests/x11_input.cpp)
+    wcas_add_test(launch-strategy tests/launch_strategy.cpp)
+    wcas_add_test(capture-runtime tests/capture_runtime.cpp)
+    wcas_add_test(runtime-bindings tests/runtime_bindings.cpp)
+    wcas_add_test(proxy-integration tests/proxy_integration.cpp)
+    wcas_add_test(dmabuf-capture tests/dmabuf_capture.cpp)
+    wcas_add_test(capture-scheduler tests/capture_scheduler.cpp)
+    wcas_add_test(capture-pipeline tests/capture_pipeline.cpp)
+    wcas_add_test(window-geometry tests/window_geometry.cpp)
+    wcas_add_test(kms-capture tests/kms_capture.cpp)
+    wcas_add_test(dmabuf-probe tests/dmabuf_probe.cpp)
+    wcas_add_test(x11-capture tests/x11_capture.cpp)
+    wcas_add_test(xwayland-bridge tests/xwayland_bridge.cpp)
+
+    # ---- 额外链接库的测试 ----
+    wcas_add_test(input-injection tests/input_injection.cpp LIBS PkgConfig::XKBCOMMON)
+    wcas_add_test(xwayland-fallback tests/xwayland_fallback.cpp LIBS PkgConfig::WAYLAND)
+
+    # ---- 脚本型冒烟测试（保留原样）----
+    add_test(NAME wcas-cli-smoke COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_smoke.sh $<TARGET_FILE:proton-inject>)
+
+    # ---- 条件编译/链接（针对已存在的 target 二次追加）----
     if(GBM_FOUND)
         target_compile_definitions(wcas-dmabuf-capture PRIVATE WCAS_HAVE_GBM=1)
         target_link_libraries(wcas-dmabuf-capture PRIVATE PkgConfig::GBM)
     endif()
 endif()
-install(TARGETS wcas LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
-install(DIRECTORY include/skl DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-# controller.h exposes ABIX interface declarations, so consumers need ABIX's
-# header-only Interface/model/mics tree as well.
-install(DIRECTORY third_party/ABIX/ABIX third_party/ABIX/mics DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(TARGETS WCAS LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(DIRECTORY include/SKL DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+# WCAS public headers include SKL/ABIX/...; ABIX itself is not installed into this prefix (the vendored submodule is
+# built runtime-only for WCAS). Consumers must provide ABIX themselves, e.g. find_package(ABIX 0.2.3 CONFIG REQUIRED).
 install(
     DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libdrmtap-prefix/lib/"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}

@@ -1,7 +1,7 @@
-#include "harness/health_monitor.h"
+#include "SKL/WCAS/Private/Harness/HealthMonitor.h"
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
 #include <iterator>
 #include <string>
 
@@ -43,7 +43,7 @@ constexpr TypeId kFakeType = skl::abix::model::canonical_type_id("test::FakeHeal
 
 int main() {
     InterfaceRegistry<2> registry;
-    assert(registry.add({HealthMonitorTraits::id, kFakeType, kMethods, static_cast<std::uint32_t>(std::size(kMethods)),
+    assert(registry.add({HealthMonitorTraits::id, kFakeType, kMethods, static_cast<uint32_t>(std::size(kMethods)),
                HealthMonitorTraits::version, 0})
            == InterfaceStatus::ok);
 

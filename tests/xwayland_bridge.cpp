@@ -3,12 +3,12 @@
 // capturable X screen, and clean up on stop(). Skips cleanly when Xwayland or
 // a Wayland display is unavailable.
 
-#include "x11_capture.h"
-#include "xwayland.h"
+#include "SKL/WCAS/Private/X11Capture.h"
+#include "SKL/WCAS/Private/XWayland.h"
 
-#include <cassert>
-#include <cstdio>
-#include <cstdlib>
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 int main() {
     const char *wayland = std::getenv("WAYLAND_DISPLAY");

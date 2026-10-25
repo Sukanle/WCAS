@@ -2,10 +2,11 @@
 // screenshots. These are pure parsers, so the test feeds fixed sway/xdotool
 // payloads and never touches a desktop session.
 
-#include "skl/wcas/drm.h"
+#include "SKL/WCAS/DRM.h"
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
+
 #include <string>
 #include <string_view>
 

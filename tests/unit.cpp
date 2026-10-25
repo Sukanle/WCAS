@@ -1,15 +1,21 @@
-#include "skl/wcas/wcas.h"
-#include "proxy/conn.h"
-#include "harness/session.h"
+#include "SKL/WCAS/WCAS.h"
+#include "SKL/WCAS/Error.h"
 
-#include "skl/wcas/error.h"
+#include "SKL/WCAS/Private/Proxy/Conn.h"
+#include "SKL/WCAS/Private/Proxy/WireMeta.h"
+#include "SKL/WCAS/Private/Harness/Session.h"
+#include "SKL/WCAS/Private/Proxy/Interfaces.h"
 
-#include "proxy/wire_meta.h"
-#include "proxy/interfaces.h"
-#include <cassert>
+#ifdef _WIN32
+#else
+#  include <unistd.h>
+#endif
+
+#include <assert.h>
+
 #include <memory>
 #include <string>
-#include <unistd.h>
+
 
 int main() {
     const auto *shm = skl::wcas::proxy::wire::find("wl_shm");
@@ -29,18 +35,18 @@ int main() {
     assert(std::string(text_input->events[5].name) == "done");
     assert(std::string(text_input->events[5].signature) == "u");
     assert(skl::wcas::proxy::wire::find("wl_not_a_real_interface") == nullptr);
-    for (std::size_t i = 0; i < skl::wcas::proxy::wire::core_interface_count(); ++i) {
+    for (size_t i = 0; i < skl::wcas::proxy::wire::core_interface_count(); ++i) {
         const auto &iface = skl::wcas::proxy::wire::core_interfaces()[i];
-        for (std::size_t opcode = 0; opcode < iface.request_count; ++opcode)
+        for (size_t opcode = 0; opcode < iface.request_count; ++opcode)
             assert(iface.requests[opcode].opcode == opcode);
-        for (std::size_t opcode = 0; opcode < iface.event_count; ++opcode)
+        for (size_t opcode = 0; opcode < iface.event_count; ++opcode)
             assert(iface.events[opcode].opcode == opcode);
     }
-    for (std::size_t i = 0; i < skl::wcas::proxy::wire::extension_interface_count(); ++i) {
+    for (size_t i = 0; i < skl::wcas::proxy::wire::extension_interface_count(); ++i) {
         const auto &iface = skl::wcas::proxy::wire::extension_interfaces()[i];
-        for (std::size_t opcode = 0; opcode < iface.request_count; ++opcode)
+        for (size_t opcode = 0; opcode < iface.request_count; ++opcode)
             assert(iface.requests[opcode].opcode == opcode);
-        for (std::size_t opcode = 0; opcode < iface.event_count; ++opcode)
+        for (size_t opcode = 0; opcode < iface.event_count; ++opcode)
             assert(iface.events[opcode].opcode == opcode);
     }
 
@@ -78,7 +84,7 @@ int main() {
         second->connected = true;
         skl::wcas::detail::register_session(4'242, first);
         skl::wcas::detail::register_session(4'242, second);
-        std::size_t seen = 0;
+        size_t seen = 0;
         for (const auto &session : skl::wcas::detail::sessions_for(4'242, "")) {
             if (session->owner_pid == 4'242) ++seen;
         }
@@ -111,7 +117,7 @@ int main() {
         assert(!skl::wcas::detail::session_for(unrelated_root));
 
         // The command line / executable fallback must find it.
-        const std::string exe_pattern = std::string(self_exe, static_cast<std::size_t>(exe_len));
+        const std::string exe_pattern = std::string(self_exe, static_cast<size_t>(exe_len));
         assert(skl::wcas::detail::session_for(unrelated_root, exe_pattern) == state);
 
         // An unrelated pattern must still miss it, so the fallback cannot match

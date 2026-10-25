@@ -1,12 +1,12 @@
 // End-to-end check for the background frame pump: launch an app, attach a
 // FrameSink, start the pump, and verify frames reach the sink.
-#include "skl/wcas/wcas.h"
+#include "SKL/WCAS/WCAS.h"
 
-#include <cassert>
+#include <assert.h>
 #include <chrono>
 #include <condition_variable>
-#include <cstdio>
-#include <cstdlib>
+#include <stdio.h>
+#include <stdlib.h>
 #include <iterator>
 #include <mutex>
 #include <string>
@@ -99,7 +99,7 @@ int main() {
     InterfaceRegistry<4> registry;
     CountingSink provider;
     const auto status = registry.add({FrameSinkTraits::id, kSinkType, kSinkMethods,
-        static_cast<std::uint32_t>(std::size(kSinkMethods)), FrameSinkTraits::version, 0});
+        static_cast<uint32_t>(std::size(kSinkMethods)), FrameSinkTraits::version, 0});
     assert(status == InterfaceStatus::ok);
     FrameSink sink(registry, &provider, kSinkType);
     assert(sink.valid());

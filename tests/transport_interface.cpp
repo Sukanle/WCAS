@@ -1,11 +1,12 @@
-#include "skl/wcas/frame.h"
+#include "SKL/WCAS/Frame.h"
 // Compile/contract test for the reserved TransportBackend descriptor. It does
 // not implement an X11 or platform backend; it only pins the capability bits
 // and ABIX binding shape for future providers.
-#include "skl/wcas/transport.h"
+#include "SKL/WCAS/Transport.h"
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
+
 #include <iterator>
 #include <string>
 
@@ -19,10 +20,10 @@ using skl::abix::poly::InterfaceStatus;
 
 class FakeTransport {
 public:
-    std::string name() const { return "fake-transport"; }
-    TransportKind kind() const { return TransportKind::Custom; }
-    bool available() const { return true; }
-    TransportCapability capabilities() const {
+    static std::string name() noexcept { return "fake-transport"; }
+    static TransportKind kind() noexcept { return TransportKind::Custom; }
+    static bool available() noexcept { return true; }
+    static TransportCapability capabilities() noexcept {
         return TransportCapability::Capture | TransportCapability::WindowEnumeration;
     }
 };
@@ -40,8 +41,8 @@ constexpr TypeId kFakeType = skl::abix::model::canonical_type_id("test::FakeTran
 
 int main() {
     InterfaceRegistry<2> registry;
-    assert(registry.add({TransportBackendTraits::id, kFakeType, kMethods,
-               static_cast<std::uint32_t>(std::size(kMethods)), TransportBackendTraits::version, 0})
+    assert(registry.add({TransportBackendTraits::id, kFakeType, kMethods, static_cast<uint32_t>(std::size(kMethods)),
+               TransportBackendTraits::version, 0})
            == InterfaceStatus::ok);
 
     FakeTransport provider;

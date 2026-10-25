@@ -1,49 +1,53 @@
-#include "proxy/conn.h"
+#include "SKL/WCAS/Private/Proxy/Conn.h"
 
-#include <sys/mman.h>
-#include <sys/socket.h>
-#include <fcntl.h>
-#include <unistd.h>
+#ifdef _WIN32
+#else
+#  include <fcntl.h>
+#  include <unistd.h>
+#  include <sys/mman.h>
+#  include <sys/socket.h>
+#endif
 
-#include <cassert>
-#include <cstdint>
-#include <cstring>
-#include <cstdio>
+#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
+
 #include <memory>
 #include <thread>
 #include <vector>
 
 namespace {
-void put(std::vector<char> &message, std::uint32_t value) {
+void put(std::vector<char> &message, uint32_t value) {
     const auto at = message.size();
     message.resize(at + 4);
-    std::memcpy(message.data() + at, &value, 4);
+    memcpy(message.data() + at, &value, 4);
 }
-std::uint32_t get(const std::vector<char> &message, std::size_t at) {
-    std::uint32_t value = 0;
-    std::memcpy(&value, message.data() + at, 4);
+uint32_t get(const std::vector<char> &message, size_t at) {
+    uint32_t value = 0;
+    memcpy(&value, message.data() + at, 4);
     return value;
 }
 void string_arg(std::vector<char> &message, const char *value) {
-    const auto length = static_cast<std::uint32_t>(std::strlen(value) + 1);
+    const auto length = static_cast<uint32_t>(strlen(value) + 1);
     put(message, length);
     const auto at = message.size();
     message.resize(at + ((length + 3u) & ~3u));
-    std::memcpy(message.data() + at, value, length);
+    memcpy(message.data() + at, value, length);
 }
-std::vector<char> message(std::uint32_t object, std::uint16_t opcode) {
+std::vector<char> message(uint32_t object, uint16_t opcode) {
     std::vector<char> result(8);
-    std::memcpy(result.data(), &object, 4);
-    std::uint32_t header = opcode;
-    std::memcpy(result.data() + 4, &header, 4);
+    memcpy(result.data(), &object, 4);
+    uint32_t header = opcode;
+    memcpy(result.data() + 4, &header, 4);
     return result;
 }
 void finish(std::vector<char> &message) {
-    const auto size = static_cast<std::uint32_t>(message.size());
-    std::uint32_t header = 0;
-    std::memcpy(&header, message.data() + 4, 4);
+    const auto size = static_cast<uint32_t>(message.size());
+    uint32_t header = 0;
+    memcpy(&header, message.data() + 4, 4);
     header = (size << 16) | (header & 0xffffu);
-    std::memcpy(message.data() + 4, &header, 4);
+    memcpy(message.data() + 4, &header, 4);
 }
 void send_message(int fd, const std::vector<char> &message, int passed_fd = -1) {
     iovec iov{const_cast<char *>(message.data()), message.size()};
@@ -58,7 +62,7 @@ void send_message(int fd, const std::vector<char> &message, int passed_fd = -1) 
         header->cmsg_level = SOL_SOCKET;
         header->cmsg_type = SCM_RIGHTS;
         header->cmsg_len = CMSG_LEN(sizeof(int));
-        std::memcpy(CMSG_DATA(header), &passed_fd, sizeof(passed_fd));
+        memcpy(CMSG_DATA(header), &passed_fd, sizeof(passed_fd));
     }
     assert(::sendmsg(fd, &output, 0) == static_cast<ssize_t>(message.size()));
 }
@@ -72,9 +76,9 @@ std::vector<char> receive(int fd, int *received_fd = nullptr) {
     input.msg_control = control;
     input.msg_controllen = sizeof(control);
     assert(::recvmsg(fd, &input, MSG_WAITALL) == 8);
-    std::uint32_t header = 0;
-    std::memcpy(&header, bytes.data() + 4, sizeof(header));
-    const auto size = static_cast<std::size_t>(header >> 16);
+    uint32_t header = 0;
+    memcpy(&header, bytes.data() + 4, sizeof(header));
+    const auto size = static_cast<size_t>(header >> 16);
     assert(size >= 8 && (size & 3u) == 0);
     bytes.resize(size);
     if (size > 8) assert(::recv(fd, bytes.data() + 8, size - 8, MSG_WAITALL) == static_cast<ssize_t>(size - 8));
@@ -82,15 +86,15 @@ std::vector<char> receive(int fd, int *received_fd = nullptr) {
         *received_fd = -1;
         for (auto *header = CMSG_FIRSTHDR(&input); header; header = CMSG_NXTHDR(&input, header)) {
             if (header->cmsg_level == SOL_SOCKET && header->cmsg_type == SCM_RIGHTS) {
-                std::memcpy(received_fd, CMSG_DATA(header), sizeof(int));
+                memcpy(received_fd, CMSG_DATA(header), sizeof(int));
                 break;
             }
         }
     }
     return bytes;
 }
-void bind_global(int app_fd, int compositor_fd, std::uint32_t global, const char *name, std::uint32_t app_registry,
-    std::uint32_t app_object, std::uint32_t version = 1) {
+void bind_global(int app_fd, int compositor_fd, uint32_t global, const char *name, uint32_t app_registry,
+    uint32_t app_object, uint32_t version = 1) {
     // Ids pass through unchanged, so the registry's upstream id equals the
     // app-side id the test chose.
     auto event = message(app_registry, 0);
@@ -143,7 +147,7 @@ int main() {
     const int shm_fd = ::memfd_create("wcas-shm-test", MFD_CLOEXEC);
     assert(shm_fd >= 0);
     assert(::ftruncate(shm_fd, 4'096) == 0);
-    const std::uint32_t pixels[4]{0x000000ffu, 0x0000ff00u, 0x00ff0000u, 0x00ffffffu};
+    const uint32_t pixels[4]{0x000000ffu, 0x0000ff00u, 0x00ff0000u, 0x00ffffffu};
     assert(::pwrite(shm_fd, pixels, sizeof(pixels), 0) == static_cast<ssize_t>(sizeof(pixels)));
     auto pool = message(8, 0);
     put(pool, 9);
@@ -360,7 +364,7 @@ int main() {
 
     // Create the shell surface (60) and its render child surface (61) so the
     // proxy records their wl_surface role and can clean them up on destroy.
-    for (std::uint32_t sid : {60u, 61u}) {
+    for (uint32_t sid : {60u, 61u}) {
         auto create_surface = message(6, 0);   // wl_compositor.create_surface = "n"
         put(create_surface, sid);
         finish(create_surface);
@@ -406,8 +410,8 @@ int main() {
     // Several more children of the same shell surface: destroying the shell
     // must hand the name to every one of them (this also exercises rehashing
     // the metadata map while iterating the parent links).
-    for (std::uint32_t pair = 0; pair < 20; ++pair) {
-        const std::uint32_t sid = 100 + pair;
+    for (uint32_t pair = 0; pair < 20; ++pair) {
+        const uint32_t sid = 100 + pair;
         auto create_surface = message(6, 0);
         put(create_surface, sid);
         finish(create_surface);
@@ -484,7 +488,7 @@ int main() {
         assert(state->surface_metadata.find(60) == state->surface_metadata.end());
         assert(state->surface_to_parent_surface.find(61) == state->surface_to_parent_surface.end());
         // Every child inherited the shell surface's name before it was dropped.
-        for (std::uint32_t pair = 0; pair < 20; ++pair) {
+        for (uint32_t pair = 0; pair < 20; ++pair) {
             const auto it = state->surface_metadata.find(100 + pair);
             assert(it != state->surface_metadata.end());
             assert(it->second.app_id && *it->second.app_id == "platformprocess.exe");

@@ -1,17 +1,16 @@
 // Production binding smoke test: construct each capability runtime with an
 // empty SessionContext. A wrong method table shows up as feature_not_implemented
 // before any real capture/window/input path is reached.
-#include "harness/capture_source.h"
-#include "harness/focus_backend.h"
-#include "harness/health_monitor.h"
-#include "harness/session_context.h"
-#include "harness/target_selector.h"
-#include "harness/window_source.h"
+#include "SKL/WCAS/Error.h"
+#include "SKL/WCAS/Private/Harness/CaptureSource.h"
+#include "SKL/WCAS/Private/Harness/FocusBackend.h"
+#include "SKL/WCAS/Private/Harness/HealthMonitor.h"
+#include "SKL/WCAS/Private/Harness/SessionContext.h"
+#include "SKL/WCAS/Private/Harness/TargetSelector.h"
+#include "SKL/WCAS/Private/Harness/WindowSource.h"
 
-#include "skl/wcas/error.h"
-
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
 
 using namespace skl::wcas;
 

@@ -1,5 +1,5 @@
-#include "skl/wcas/wcas.h"
-#include "skl/wcas/dmabuf_probe.h"
+#include "SKL/WCAS/WCAS.h"
+#include "SKL/WCAS/DMABUF.h"
 
 #include <opencv2/imgcodecs.hpp>
 #include <boost/program_options.hpp>
@@ -7,10 +7,10 @@
 #include <fmt/std.h>
 
 #include <algorithm>
-#include <cctype>
+#include <ctype.h>
 #include <chrono>
-#include <cstdio>
-#include <cstdlib>
+#include <stdio.h>
+#include <stdlib.h>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -418,8 +418,8 @@ optional<Session> launch_session(const Options &options) {
 // ── interactive shell ───────────────────────────────────────────────────────
 
 struct FrameBarrier {
-    std::uint64_t commits = 0;
-    std::uint64_t frames = 0;
+    uint64_t commits = 0;
+    uint64_t frames = 0;
 };
 
 double clamp_axis(double value, int extent) {
@@ -843,7 +843,7 @@ void Shell::select_index(int index) {
 void Shell::select_by_name(const std::string &name) {
     const auto wins = session_.app.windows();
     int found = -1;
-    for (std::size_t i = 0; i < wins.size(); ++i) {
+    for (size_t i = 0; i < wins.size(); ++i) {
         if (wins[i].app_id == name || wins[i].title == name) {
             found = static_cast<int>(i);
             break;
@@ -935,7 +935,7 @@ void Shell::cmd_list(std::istringstream &) {
         fmt::println("no windows ({} sessions, none rendered) — try `sessions`", session_.app.sessions().size());
         return;
     }
-    for (std::size_t i = 0; i < wins.size(); ++i) {
+    for (size_t i = 0; i < wins.size(); ++i) {
         const auto &w = wins[i];
         const char *origin = w.origin == WindowOrigin::Toplevel   ? "toplevel"
                            : w.origin == WindowOrigin::Subsurface ? "subsurface"

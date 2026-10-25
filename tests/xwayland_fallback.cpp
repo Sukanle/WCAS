@@ -3,12 +3,13 @@
 // and launch() must start an Xwayland bridge, wait for visible content within
 // content_timeout, and adopt the app as Transport::xwayland.
 
-#include "skl/wcas/wcas.h"
+#include "SKL/WCAS/WCAS.h"
 
-#include <cassert>
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <chrono>
-#include <cstdio>
-#include <cstdlib>
 
 int main() {
     using namespace skl::wcas;

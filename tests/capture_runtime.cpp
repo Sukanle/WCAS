@@ -1,13 +1,13 @@
 // Regression guard for the production CaptureRuntime binding. An unbound or
 // signature-mismatched CaptureSource reports feature_not_implemented; this test
 // proves the real AutoCaptureSource binding is valid before any frame exists.
-#include "harness/capture_source.h"
-#include "harness/session_context.h"
+#include "SKL/WCAS/Private/Harness/CaptureSource.h"
+#include "SKL/WCAS/Private/Harness/SessionContext.h"
 
-#include "skl/wcas/error.h"
+#include "SKL/WCAS/Error.h"
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
 
 using namespace skl::wcas;
 

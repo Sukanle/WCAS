@@ -1,7 +1,7 @@
-#include "harness/launch_strategy.h"
+#include "SKL/WCAS/Private/Harness/LaunchStrategy.h"
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
 
 using namespace skl::wcas;
 

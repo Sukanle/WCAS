@@ -1,8 +1,8 @@
-#include "harness/process_host.h"
+#include "SKL/WCAS/Private/Harness/ProcessHost.h"
 
-#include <cassert>
+#include <assert.h>
 #include <chrono>
-#include <cstdio>
+#include <stdio.h>
 #include <thread>
 
 using namespace skl::wcas;

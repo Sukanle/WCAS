@@ -2,34 +2,34 @@
 // latest-frame selection and the all-slots-busy drop policy. Uses a memfd as a
 // stand-in DMA-BUF so the test needs neither a compositor nor a GPU.
 
-#include "proxy/capture_scheduler.h"
-#include "proxy/capture_slot.h"
-#include "proxy/reactor.h"
+#include "SKL/WCAS/Private/Proxy/CaptureScheduler.h"
+#include "SKL/WCAS/Private/Proxy/CaptureSlot.h"
+#include "SKL/WCAS/Private/Proxy/Reactor.h"
 
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <cassert>
-#include <cstdint>
-#include <cstdio>
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
 
 #include <opencv2/core.hpp>
 
 namespace {
 
-constexpr std::uint32_t drm_argb8888 = 0x34325241u;
+constexpr uint32_t drm_argb8888 = 0X34325241U;
 
-int make_linear_dmabuf(int width, int height, std::uint32_t *stride) {
-    *stride = static_cast<std::uint32_t>(width) * 4u;
-    const std::size_t size = static_cast<std::size_t>(*stride) * static_cast<std::size_t>(height);
+int make_linear_dmabuf(int width, int height, uint32_t *stride) {
+    *stride = static_cast<uint32_t>(width) * 4u;
+    const size_t size = static_cast<size_t>(*stride) * static_cast<size_t>(height);
     const int fd = ::memfd_create("wcas-sched-test", MFD_CLOEXEC);
     assert(fd >= 0);
     assert(::ftruncate(fd, static_cast<off_t>(size)) == 0);
     void *base = ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     assert(base != MAP_FAILED);
     for (int y = 0; y < height; ++y) {
-        auto *row = static_cast<unsigned char *>(base) + static_cast<std::size_t>(y) * *stride;
+        auto *row = static_cast<unsigned char *>(base) + static_cast<size_t>(y) * *stride;
         for (int x = 0; x < width; ++x) {
             const int i = y * width + x;
             row[x * 4 + 0] = static_cast<unsigned char>(i);
@@ -42,7 +42,7 @@ int make_linear_dmabuf(int width, int height, std::uint32_t *stride) {
     return fd;
 }
 
-skl::wcas::proxy::CaptureJob make_job(int memfd, int width, int height, std::uint32_t stride) {
+skl::wcas::proxy::CaptureJob make_job(int memfd, int width, int height, uint32_t stride) {
     skl::wcas::proxy::CaptureJob job;
     job.fd = ::dup(memfd);
     assert(job.fd >= 0);
@@ -73,7 +73,7 @@ int main() {
     using namespace skl::wcas::proxy;
     const int width = 4;
     const int height = 3;
-    std::uint32_t stride = 0;
+    uint32_t stride = 0;
     const int memfd = make_linear_dmabuf(width, height, &stride);
 
     Reactor reactor;

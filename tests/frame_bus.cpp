@@ -1,11 +1,11 @@
 // FrameBus fan-out/backpressure test. Uses the internal bus header so the
 // threading and queue policy are exercised, not just the ABIX contract.
-#include "harness/frame_bus.h"
+#include "SKL/WCAS/Private/Harness/FrameBus.h"
 
-#include <cassert>
+#include <assert.h>
 #include <chrono>
 #include <condition_variable>
-#include <cstdio>
+#include <stdio.h>
 #include <iterator>
 #include <mutex>
 #include <string>
@@ -126,7 +126,7 @@ constexpr TypeId kFakeSinkType = skl::abix::model::canonical_type_id("test::Fake
 
 FrameSink make_sink(InterfaceRegistry<2> &registry, FakeSink &provider) {
     const auto status = registry.add({FrameSinkTraits::id, kFakeSinkType, kSinkMethods,
-        static_cast<std::uint32_t>(std::size(kSinkMethods)), FrameSinkTraits::version, 0});
+        static_cast<uint32_t>(std::size(kSinkMethods)), FrameSinkTraits::version, 0});
     assert(status == InterfaceStatus::ok);
     FrameSink sink(registry, &provider, kFakeSinkType);
     assert(sink.valid());
@@ -252,7 +252,7 @@ int main() {
         InterfaceRegistry<2> registry;
         FakeSink provider;
         const auto status = registry.add({FrameSinkTraits::id, kFakeSinkType, kSinkMethods,
-            static_cast<std::uint32_t>(std::size(kSinkMethods)), FrameSinkTraits::version, 0});
+            static_cast<uint32_t>(std::size(kSinkMethods)), FrameSinkTraits::version, 0});
         assert(status == InterfaceStatus::ok);
         constexpr TypeId unknown_type = skl::abix::model::canonical_type_id("test::UnknownFrameSink");
         FrameSink missing(registry, &provider, unknown_type);

@@ -1,12 +1,13 @@
 // Contract test for WindowEnumerator / WindowResolver. A plain fake provider
 // proves both interfaces can be registered and bound independently.
-#include "skl/wcas/window.h"
+#include "SKL/WCAS/Window.h"
 
-#include <cassert>
-#include <cstdio>
-#include <iterator>
+#include <assert.h>
+#include <stdio.h>
+
 #include <string>
 #include <vector>
+#include <iterator>
 
 namespace {
 
@@ -34,15 +35,15 @@ public:
         return boost::outcome_v2::success(std::vector<WindowInfo>{std::move(first)});
     }
 
-    result<Rect> find_by_pid(int32_t pid) const {
+    result<cv::Rect> find_by_pid(int32_t pid) const {
         if (pid != 42) return std::make_error_code(std::errc::invalid_argument);
-        return Rect{10, 20, 1'280, 720};
+        return cv::Rect{10, 20, 1'280, 720};
     }
 
-    result<Rect> find_by_size_and_title(int32_t width, int32_t height, std::string title) const {
+    result<cv::Rect> find_by_size_and_title(int32_t width, int32_t height, std::string title) const {
         if (width != 1'280 || height != 720 || title != "Demo Window")
             return std::make_error_code(std::errc::invalid_argument);
-        return Rect{10, 20, 1'280, 720};
+        return cv::Rect{10, 20, 1'280, 720};
     }
 };
 
@@ -67,10 +68,10 @@ constexpr TypeId kFakeType = skl::abix::model::canonical_type_id("test::FakeWind
 int main() {
     InterfaceRegistry<4> registry;
     assert(registry.add({WindowEnumeratorTraits::id, kFakeType, kEnumeratorMethods,
-               static_cast<std::uint32_t>(std::size(kEnumeratorMethods)), WindowEnumeratorTraits::version, 0})
+               static_cast<uint32_t>(std::size(kEnumeratorMethods)), WindowEnumeratorTraits::version, 0})
            == InterfaceStatus::ok);
     assert(registry.add({WindowResolverTraits::id, kFakeType, kResolverMethods,
-               static_cast<std::uint32_t>(std::size(kResolverMethods)), WindowResolverTraits::version, 0})
+               static_cast<uint32_t>(std::size(kResolverMethods)), WindowResolverTraits::version, 0})
            == InterfaceStatus::ok);
 
     FakeWindowProvider provider;
@@ -92,11 +93,11 @@ int main() {
 
     const auto by_pid = resolver.find_by_pid(42);
     assert(by_pid.has_value());
-    assert(by_pid.value() == Rect(10, 20, 1'280, 720));
+    assert(by_pid.value() == cv::Rect(10, 20, 1'280, 720));
 
     const auto by_title = resolver.find_by_size_and_title(1'280, 720, std::string("Demo Window"));
     assert(by_title.has_value());
-    assert(by_title.value() == Rect(10, 20, 1'280, 720));
+    assert(by_title.value() == cv::Rect(10, 20, 1'280, 720));
 
     constexpr TypeId unknown_type = skl::abix::model::canonical_type_id("test::UnknownWindowProvider");
     WindowEnumerator missing(registry, &provider, unknown_type);

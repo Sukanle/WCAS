@@ -1,10 +1,10 @@
 // Contract test for CaptureInfo / CaptureSource. The fake provider proves that
 // a capture backend can be a plain struct, bound independently of the concrete
 // auto-capture implementation used by ControlledApp.
-#include "skl/wcas/capture.h"
+#include "SKL/WCAS/Capture.h"
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
 #include <iterator>
 #include <string>
 
@@ -25,7 +25,7 @@ struct FakeCapture {
     int captures = 0;
 };
 
-std::uint64_t fake_id(const void *) { return 7; }
+uint64_t fake_id(const void *) { return 7; }
 std::string fake_name(const void *) { return "fake-shm"; }
 bool fake_connected(const void *) { return true; }
 CaptureKind fake_kind(const void *) { return CaptureKind::SHM; }
@@ -50,7 +50,7 @@ optional<cv::Size> fake_frame_size(const void *) { return cv::Size{5, 4}; }
 // in a class so the test exercises the same binding style as capture_source.cpp.
 class FakeCaptureDevice {
 public:
-    std::uint64_t id() const { return fake_id(nullptr); }
+    uint64_t id() const { return fake_id(nullptr); }
     std::string name() const { return fake_name(nullptr); }
     bool connected() const { return fake_connected(nullptr); }
     CaptureKind kind() const { return fake_kind(nullptr); }
@@ -86,10 +86,10 @@ constexpr TypeId kFakeType = skl::abix::model::canonical_type_id("test::FakeCapt
 int main() {
     InterfaceRegistry<4> registry;
     assert(registry.add({CaptureInfoTraits::id, kFakeType, kDeviceInfoMethods,
-               static_cast<std::uint32_t>(std::size(kDeviceInfoMethods)), CaptureInfoTraits::version, 0})
+               static_cast<uint32_t>(std::size(kDeviceInfoMethods)), CaptureInfoTraits::version, 0})
            == InterfaceStatus::ok);
     assert(registry.add({CaptureSourceTraits::id, kFakeType, kDeviceSourceMethods,
-               static_cast<std::uint32_t>(std::size(kDeviceSourceMethods)), CaptureSourceTraits::version, 0})
+               static_cast<uint32_t>(std::size(kDeviceSourceMethods)), CaptureSourceTraits::version, 0})
            == InterfaceStatus::ok);
 
     FakeCaptureDevice device;
