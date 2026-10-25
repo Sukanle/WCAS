@@ -14,28 +14,29 @@ WCAS 的后端不是一棵继承树：capture、输入、窗口、传输和帧�
 
 ## 契约地图
 
-| 能力               | 契约/实现                                      | 说明                                                                                  |
-| ------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
-| 输入设备           | `include/skl/wcas/controller.h`                | `DeviceInfo` / `PointerController` / `KeyboardController` / `GamepadController`       |
-| 输入 provider      | `src/skl/wcas/harness/controller.cpp`          | native 私有 seat；XWayland 选择 `X11InputDevice`                                      |
-| X11 输入           | `src/skl/wcas/harness/x11_input.{h,cpp}`       | Xlib + XTest；实现现有 Controller 能力                                                |
-| 截图               | `include/skl/wcas/capture.h`                   | `CaptureInfo` / `CaptureSource`                                                       |
-| 截图 provider      | `src/skl/wcas/harness/capture_source.{h,cpp}`  | AutoCaptureSource / shm / DMA-BUF / KMS / grim / X11                                  |
-| DMA-BUF 解码       | `src/skl/wcas/proxy/dmabuf_decoder.h`          | `DmaBufDecoder` + Auto/Vulkan/EGL/Mmap                                                |
-| 推帧               | `include/skl/wcas/frame.h`                     | `FrameSink` / `FrameView` / `SinkPolicy`                                              |
-| 推帧调度           | `src/skl/wcas/harness/frame_bus.{h,cpp}`       | per-sink mailbox、worker/shared dispatcher、背压                                      |
-| 窗口枚举/几何      | `include/skl/wcas/window.h`                    | `WindowEnumerator` / `WindowResolver`                                                 |
-| 窗口 runtime       | `src/skl/wcas/harness/window_source.{h,cpp}`   | native proxy / X11 枚举，geometry 回退                                                |
-| 传输描述           | `include/skl/wcas/transport.h`                 | `TransportKind` / `TransportCapability` / `TargetId` / `LaunchSpec` / `SessionHandle` |
-| `TransportBackend` | `include/skl/wcas/transport.h`                 | 预留描述接口，无生产 provider                                                         |
-| 进程               | `src/skl/wcas/harness/process_host.{h,cpp}`    | fork/exec、进程组、PDEATHSIG、terminate                                               |
-| 会话上下文         | `src/skl/wcas/harness/session_context.h`       | capture/window/input 共用的 transport/session 状态                                    |
-| 焦点               | `src/skl/wcas/harness/focus_backend.{h,cpp}`   | `FocusBackend`：available/set_allowed/allowed/apply                                   |
-| 健康               | `src/skl/wcas/harness/health_monitor.{h,cpp}`  | alive/connected/commit/presented                                                      |
-| 目标选择           | `src/skl/wcas/harness/target_selector.{h,cpp}` | index 与 `TargetId` 选择                                                              |
-| 启动策略           | `src/skl/wcas/harness/launch_strategy.{h,cpp}` | `LaunchStrategy` 描述/排序；native → XWayland                                         |
+> 公共头根目录为 `include/SKL/WCAS/`；私有头与实现分别位于 `include/SKL/WCAS/Private/` 和 `src/SKL/WCAS/Private/`。表中 `{h,cpp}` 表示同名头文件与源文件。
 
-专题文档：
+| 能力               | 契约/实现                                | 说明                                                                                  |
+| ------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------- |
+| 输入设备           | `include/SKL/WCAS/Controller.h`          | `DeviceInfo` / `PointerController` / `KeyboardController` / `GamepadController`       |
+| 输入 provider      | `Private/Harness/Controller.cpp`         | native 私有 seat；XWayland 选择 `X11InputDevice`                                      |
+| X11 输入           | `Private/Harness/X11Input.{h,cpp}`       | Xlib + XTest；实现现有 Controller 能力                                                |
+| 截图               | `include/SKL/WCAS/Capture.h`             | `CaptureInfo` / `CaptureSource`                                                       |
+| 截图 provider      | `Private/Harness/CaptureSource.{h,cpp}`  | AutoCaptureSource / shm / DMA-BUF / KMS / grim / X11                                  |
+| DMA-BUF 解码       | `Private/Proxy/DMABUF/Decoder.h`         | `DmaBufDecoder` + Auto/Vulkan/EGL/Mmap                                                |
+| 推帧               | `include/SKL/WCAS/Frame.h`               | `FrameSink` / `FrameView` / `SinkPolicy`                                              |
+| 推帧调度           | `Private/Harness/FrameBus.{h,cpp}`       | per-sink mailbox、worker/shared dispatcher、背压                                      |
+| 窗口枚举/几何      | `include/SKL/WCAS/Window.h`              | `WindowEnumerator` / `WindowResolver`                                                 |
+| 窗口 runtime       | `Private/Harness/WindowSource.{h,cpp}`   | native proxy / X11 枚举，geometry 回退                                                |
+| 传输描述           | `include/SKL/WCAS/Transport.h`           | `TransportKind` / `TransportCapability` / `TargetId` / `LaunchSpec` / `SessionHandle` |
+| `TransportBackend` | `include/SKL/WCAS/Transport.h`           | 预留描述接口，无生产 provider                                                         |
+| 进程               | `Private/Harness/ProcessHost.{h,cpp}`    | fork/exec、进程组、PDEATHSIG、terminate                                               |
+| 会话上下文         | `Private/Harness/SessionContext.h`       | capture/window/input 共用的 transport/session 状态                                    |
+| 焦点               | `Private/Harness/FocusBackend.{h,cpp}`   | `FocusBackend`：available/set_allowed/allowed/apply                                   |
+| 健康               | `Private/Harness/HealthMonitor.{h,cpp}`  | alive/connected/commit/presented                                                      |
+| 目标选择           | `Private/Harness/TargetSelector.{h,cpp}` | index 与 `TargetId` 选择                                                              |
+| 启动策略           | `Private/Harness/LaunchStrategy.{h,cpp}` | `LaunchStrategy` 描述/排序；native → XWayland                                         |
+| 专题文档：         |
 
 - [CONTROLLER.md](CONTROLLER.md)：Controller/ABIX 选型与成员适配器
 - [FRAMES.md](FRAMES.md)：FrameSink/FrameBus 线程与背压

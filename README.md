@@ -212,12 +212,13 @@ Health、Target、FrameBus 各自绑定 ABIX provider；`SessionContext` 提供 
 - 协议：libwayland（client + server）、xkbcommon、xcb + xcb-composite
 - XWayland 输入（可选）：X11 + Xtst（XTest）；缺失时 X11 输入 provider 保留但返回
   `feature_not_implemented`
-- Interface：`third_party/ABIX`（头文件契约层）
+- Interface：`third_party/ABIX`（v0.2.3 子模块，提供 `SKL/ABIX` 契约与 MICS；默认
+  runtime-only 构建，可用 `-DWCAS_USE_SYSTEM_ABIX=ON` 改为消费已安装的 ABIX CMake 包）
 - GPU：Vulkan、libdrm ≥ 2.4.95、liburing
 - GPU（可选）：EGL + GLESv2 + GBM —— DMA-BUF 的 EGL 后端。缺失时该后端编译为 stub，
   采集退回 Vulkan
 - 生成元数据所需：`wayland.xml`、`wayland-protocols/`、`wayland-server-protocol.h`
-- 子模块：`third_party/libdrmtap`（MIT）
+- 子模块：`third_party/ABIX`、`third_party/cmdly`、`third_party/libdrmtap`（MIT）
 
 初始化子模块：
 
@@ -241,6 +242,9 @@ ctest --test-dir build/Debug --output-on-failure
 ```
 
 > 始终使用**独立构建目录**。历史上曾因混用旧的构建产物误判“协议元数据损坏”。
+>
+> 默认从 `third_party/ABIX` 以 runtime-only 方式构建 ABIX，无需预装 LLVM/AMC 或 ABIX 包；
+> 若要使用已安装的 ABIX 0.2.3，追加 `-DWCAS_USE_SYSTEM_ABIX=ON -DCMAKE_PREFIX_PATH=<prefix>`。
 
 ## 七、如何使用
 
@@ -452,23 +456,35 @@ WCAS **不**为受控应用提供沙箱：被控应用仍拥有调用方用户�
 ## 十、项目结构
 
 ```
-include/skl/wcas/     公共头文件（wcas.h；controller/capture/frame/window/transport 等契约）
-src/skl/wcas/
-  proxy/              Wayland 代理：reactor、wire 翻译、interfaces、surface 观察、
-                      输入、截图槽位、DMA-BUF decoder、Vulkan / EGL+GBM 导入
-  harness/            ComputerUse、ControlledApp、ProcessHost、SessionContext、
-                      Capture/Window/Focus/Health/Target/FrameBus/LaunchStrategy、
-                      X11 XTest 输入
-  xwayland.cpp        XWayland bridge
-  x11_capture.cpp     X11/XComposite 抓取与窗口枚举
-  drm.cpp             DRM/KMS 与窗口几何
-  dmabuf_probe.cpp    DMA-BUF 能力探测
-third_party/ABIX/     Interface 契约与 proxy 实现（头文件）
-codegen/              由协议 XML 生成 wire 元数据（构建期执行）
-tests/                单元测试与协议集成测试（fake Wayland 环境）
-docs/                 项目文档（INTERFACE / STATUS / REFERENCE / CAPTURE / COMPATIBILITY /
-                      CONTROLLER / FRAMES / MAA-COMPARISON / Proton / SECURITY）
-proton-inject*.sh     Proton / Lutris 启动包装
+include/SKL/               skl 公共头
+  Config.h                 skl 全局配置
+  ErrorCode.h              skl 错误码
+  WCAS/                    WCAS 公共契约（WCAS / Controller / Capture / Frame / Window /
+                           Transport / Types / Error / DRM / DMABUF）
+  WCAS/Private/            内部头（Debug、Harness、Proxy、DMABUF、X11Capture、XWayland）
+src/SKL/WCAS/
+  Error.cpp                错误码实现
+  DRM.cpp                  DRM/KMS 与窗口几何
+  DMABUF.cpp               DMA-BUF 能力探测
+  Private/Proxy/           Wayland 代理：Reactor、wire 翻译、Interfaces、surface 观察、
+                           输入、截图槽位/调度、DMA-BUF 解码、Vulkan / EGL+GBM 导入
+  Private/Harness/         ComputerUse、ControlledApp、ProcessHost、SessionContext、
+                           Capture/Window/Focus/Health/Target/FrameBus/LaunchStrategy、
+                           X11 XTest 输入
+  Private/XWayland.cpp     XWayland bridge
+  Private/X11Capture.cpp   X11/XComposite 抓取与窗口枚举
+third_party/
+  ABIX/                    ABIX Interface 契约 + MICS（v0.2.3，runtime-only 子模块）
+  cmdly/                   命令行行编辑（CLI 使用）
+  libdrmtap/               DRM/KMS 辅助（MIT，独立子模块）
+codegen/                   由协议 XML 生成 wire 元数据（构建期执行）
+scripts/                   维护脚本（Markdown reflow 等）
+tests/                     单元测试与协议集成测试（fake Wayland 环境）
+docs/                      项目文档（INTERFACE / STATUS / REFERENCE / CAPTURE / COMPATIBILITY /
+                           CONTROLLER / FRAMES / MAA-COMPARISON / Proton / SECURITY）
+main.cpp                   库使用示例
+proton-inject.cpp          CLI
+proton-inject*.sh          Proton / Lutris 启动包装
 ```
 
 ## 十一、许可
