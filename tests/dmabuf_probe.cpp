@@ -2,14 +2,14 @@
 // memfd: a valid fd that is not a real DMA-BUF, so the ioctls fail cleanly
 // while the probe structure and reporting are still exercised.
 
-#include "skl/wcas/dmabuf_probe.h"
+#include "SKL/WCAS/DMABUF.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
 #include <string>
 
 int main() {

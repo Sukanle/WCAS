@@ -1,7 +1,8 @@
-#include "harness/target_selector.h"
+#include "SKL/WCAS/Private/Harness/TargetSelector.h"
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
+
 #include <iterator>
 #include <string>
 
@@ -56,7 +57,7 @@ constexpr TypeId kFakeType = skl::abix::model::canonical_type_id("test::FakeTarg
 
 int main() {
     InterfaceRegistry<2> registry;
-    assert(registry.add({TargetSelectorTraits::id, kFakeType, kMethods, static_cast<std::uint32_t>(std::size(kMethods)),
+    assert(registry.add({TargetSelectorTraits::id, kFakeType, kMethods, static_cast<uint32_t>(std::size(kMethods)),
                TargetSelectorTraits::version, 0})
            == InterfaceStatus::ok);
 

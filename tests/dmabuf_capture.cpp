@@ -5,9 +5,9 @@
 // linear buffer with a non-zero plane offset, which is exactly the shape the
 // proxy's linear readback path supports.
 
-#include "proxy/conn.h"
-#include "proxy/egl_dmabuf.h"
-#include "proxy/vulkan_dmabuf.h"
+#include "SKL/WCAS/Private/Proxy/Conn.h"
+#include "SKL/WCAS/Private/Proxy/DMABUF/EGL.h"
+#include "SKL/WCAS/Private/Proxy/DMABUF/Vulkan.h"
 
 #ifdef WCAS_HAVE_GBM
 #  include <gbm.h>
@@ -20,10 +20,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <cassert>
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -36,40 +36,40 @@ namespace {
 
 using skl::wcas::proxy::ConnState;
 
-constexpr std::uint32_t drm_argb8888 = 0x34325241u;   // memory: B,G,R,A
-constexpr std::uint32_t drm_nv12 = 0x3231564eu;       // 'NV12', two planes
+constexpr uint32_t drm_argb8888 = 0x34325241u;   // memory: B,G,R,A
+constexpr uint32_t drm_nv12 = 0x3231564eu;       // 'NV12', two planes
 
-void put(std::vector<char> &message, std::uint32_t value) {
+void put(std::vector<char> &message, uint32_t value) {
     const auto at = message.size();
     message.resize(at + 4);
-    std::memcpy(message.data() + at, &value, 4);
+    memcpy(message.data() + at, &value, 4);
 }
-std::uint32_t get(const std::vector<char> &message, std::size_t at) {
-    std::uint32_t value = 0;
+uint32_t get(const std::vector<char> &message, size_t at) {
+    uint32_t value = 0;
     if (at + 4 > message.size()) return 0;
-    std::memcpy(&value, message.data() + at, 4);
+    memcpy(&value, message.data() + at, 4);
     return value;
 }
 void string_arg(std::vector<char> &message, const char *value) {
-    const auto length = static_cast<std::uint32_t>(std::strlen(value) + 1);
+    const auto length = static_cast<uint32_t>(strlen(value) + 1);
     put(message, length);
     const auto at = message.size();
     message.resize(at + ((length + 3u) & ~3u), 0);
-    std::memcpy(message.data() + at, value, length);
+    memcpy(message.data() + at, value, length);
 }
-std::vector<char> message(std::uint32_t object, std::uint16_t opcode) {
+std::vector<char> message(uint32_t object, uint16_t opcode) {
     std::vector<char> result(8);
-    std::memcpy(result.data(), &object, 4);
-    std::uint32_t header = opcode;
-    std::memcpy(result.data() + 4, &header, 4);
+    memcpy(result.data(), &object, 4);
+    uint32_t header = opcode;
+    memcpy(result.data() + 4, &header, 4);
     return result;
 }
 void finish(std::vector<char> &message) {
-    const auto size = static_cast<std::uint32_t>(message.size());
-    std::uint32_t header = 0;
-    std::memcpy(&header, message.data() + 4, 4);
+    const auto size = static_cast<uint32_t>(message.size());
+    uint32_t header = 0;
+    memcpy(&header, message.data() + 4, 4);
     header = (size << 16) | (header & 0xffffu);
-    std::memcpy(message.data() + 4, &header, 4);
+    memcpy(message.data() + 4, &header, 4);
 }
 void send_message(int fd, const std::vector<char> &message, int passed_fd = -1) {
     iovec iov{const_cast<char *>(message.data()), message.size()};
@@ -84,7 +84,7 @@ void send_message(int fd, const std::vector<char> &message, int passed_fd = -1) 
         header->cmsg_level = SOL_SOCKET;
         header->cmsg_type = SCM_RIGHTS;
         header->cmsg_len = CMSG_LEN(sizeof(int));
-        std::memcpy(CMSG_DATA(header), &passed_fd, sizeof(passed_fd));
+        memcpy(CMSG_DATA(header), &passed_fd, sizeof(passed_fd));
     }
     assert(::sendmsg(fd, &output, 0) == static_cast<ssize_t>(message.size()));
 }
@@ -99,9 +99,9 @@ std::vector<char> receive(int fd) {
     input.msg_control = control;
     input.msg_controllen = sizeof(control);
     assert(::recvmsg(fd, &input, MSG_WAITALL) == 8);
-    std::uint32_t wire_header = 0;
-    std::memcpy(&wire_header, bytes.data() + 4, sizeof(wire_header));
-    const auto message_size = static_cast<std::size_t>(wire_header >> 16);
+    uint32_t wire_header = 0;
+    memcpy(&wire_header, bytes.data() + 4, sizeof(wire_header));
+    const auto message_size = static_cast<size_t>(wire_header >> 16);
     assert(message_size >= 8 && (message_size & 3u) == 0);
     bytes.resize(message_size);
     if (message_size > 8)
@@ -111,10 +111,10 @@ std::vector<char> receive(int fd) {
 
 /// A memfd-backed linear "DMA-BUF" with a non-zero plane offset, filled with a
 /// per-pixel BGRA gradient so the decoded result can be checked exactly.
-int make_dmabuf(int width, int height, std::uint32_t *stride, std::uint32_t *offset, std::size_t *map_size) {
+int make_dmabuf(int width, int height, uint32_t *stride, uint32_t *offset, size_t *map_size) {
     *offset = 64;
-    *stride = static_cast<std::uint32_t>(width) * 4u;
-    *map_size = *offset + static_cast<std::size_t>(*stride) * static_cast<std::size_t>(height);
+    *stride = static_cast<uint32_t>(width) * 4u;
+    *map_size = *offset + static_cast<size_t>(*stride) * static_cast<size_t>(height);
     const int fd = ::memfd_create("wcas-dmabuf-test", MFD_CLOEXEC);
     assert(fd >= 0);
     assert(::ftruncate(fd, static_cast<off_t>(*map_size)) == 0);
@@ -122,7 +122,7 @@ int make_dmabuf(int width, int height, std::uint32_t *stride, std::uint32_t *off
     assert(base != MAP_FAILED);
     auto *bytes = static_cast<unsigned char *>(base) + *offset;
     for (int y = 0; y < height; ++y) {
-        auto *row = bytes + static_cast<std::size_t>(y) * *stride;
+        auto *row = bytes + static_cast<size_t>(y) * *stride;
         for (int x = 0; x < width; ++x) {
             const int i = y * width + x;
             row[x * 4 + 0] = static_cast<unsigned char>(i);        // B
@@ -148,8 +148,8 @@ int open_fd_count() {
 
 /// Global announcement is unnecessary here: the proxy forwards the bind
 /// request itself, and the test only cares about the object it creates.
-std::uint32_t bind_global(int app_fd, int compositor_fd, std::uint32_t registry, std::uint32_t global, const char *name,
-    std::uint32_t app_object, std::uint32_t version = 1) {
+uint32_t bind_global(int app_fd, int compositor_fd, uint32_t registry, uint32_t global, const char *name,
+    uint32_t app_object, uint32_t version = 1) {
     auto bind = message(registry, 0);
     put(bind, global);
     string_arg(bind, name);
@@ -190,9 +190,8 @@ struct Fake {
 
 /// Add one plane to a params object and create an immediate buffer from it.
 /// `modifier_hi`/`modifier_lo` default to DRM_FORMAT_MOD_LINEAR.
-void submit_dmabuf(int app_fd, int compositor_fd, std::uint32_t params_id, std::uint32_t buffer_id, int width,
-    int height, std::uint32_t format, int fd, std::uint32_t offset, std::uint32_t stride, std::uint32_t modifier_hi = 0,
-    std::uint32_t modifier_lo = 0) {
+void submit_dmabuf(int app_fd, int compositor_fd, uint32_t params_id, uint32_t buffer_id, int width, int height,
+    uint32_t format, int fd, uint32_t offset, uint32_t stride, uint32_t modifier_hi = 0, uint32_t modifier_lo = 0) {
     auto add = message(params_id, 1);   // zwp_linux_buffer_params_v1.add = "huuuuu"
     put(add, 0);                        // plane index
     put(add, offset);
@@ -205,8 +204,8 @@ void submit_dmabuf(int app_fd, int compositor_fd, std::uint32_t params_id, std::
 
     auto create = message(params_id, 3);   // create_immed = "niiuu"
     put(create, buffer_id);
-    put(create, static_cast<std::uint32_t>(width));
-    put(create, static_cast<std::uint32_t>(height));
+    put(create, static_cast<uint32_t>(width));
+    put(create, static_cast<uint32_t>(height));
     put(create, format);
     put(create, 0);
     finish(create);
@@ -214,7 +213,7 @@ void submit_dmabuf(int app_fd, int compositor_fd, std::uint32_t params_id, std::
     receive(compositor_fd);
 }
 
-std::uint32_t create_params(int app_fd, int compositor_fd, std::uint32_t dmabuf_id, std::uint32_t params_id) {
+uint32_t create_params(int app_fd, int compositor_fd, uint32_t dmabuf_id, uint32_t params_id) {
     auto create = message(dmabuf_id, 1);   // zwp_linux_dmabuf_v1.create_params = "n"
     put(create, params_id);
     finish(create);
@@ -225,7 +224,7 @@ std::uint32_t create_params(int app_fd, int compositor_fd, std::uint32_t dmabuf_
     return upstream;
 }
 
-void attach_and_commit(int app_fd, int compositor_fd, std::uint32_t surface_id, std::uint32_t buffer_id) {
+void attach_and_commit(int app_fd, int compositor_fd, uint32_t surface_id, uint32_t buffer_id) {
     auto attach = message(surface_id, 1);   // wl_surface.attach = "?oii"
     put(attach, buffer_id);
     put(attach, 0);
@@ -259,16 +258,16 @@ int main() {
     put(get_registry, 5);
     finish(get_registry);
     send_message(app_fd, get_registry);
-    const std::uint32_t registry_id = 5;
+    const uint32_t registry_id = 5;
     receive(compositor_fd);
 
-    const std::uint32_t compositor_id = 6;
-    const std::uint32_t dmabuf_id = 9;
+    const uint32_t compositor_id = 6;
+    const uint32_t dmabuf_id = 9;
     bind_global(app_fd, compositor_fd, registry_id, 11, "wl_compositor", compositor_id);
     bind_global(app_fd, compositor_fd, registry_id, 12, "zwp_linux_dmabuf_v1", dmabuf_id, 4);
 
     // --- a surface to commit into ---
-    const std::uint32_t surface_id = 7;
+    const uint32_t surface_id = 7;
     auto get_surface = message(compositor_id, 0);   // wl_compositor.create_surface = "n"
     put(get_surface, surface_id);
     finish(get_surface);
@@ -278,13 +277,13 @@ int main() {
     // --- a single-plane linear ARGB8888 buffer ---
     const int width = 4;
     const int height = 3;
-    const std::uint32_t params_id = 20;
-    const std::uint32_t buffer_id = 21;
+    const uint32_t params_id = 20;
+    const uint32_t buffer_id = 21;
     create_params(app_fd, compositor_fd, dmabuf_id, params_id);
 
-    std::uint32_t stride = 0;
-    std::uint32_t offset = 0;
-    std::size_t map_size = 0;
+    uint32_t stride = 0;
+    uint32_t offset = 0;
+    size_t map_size = 0;
     const int buf_fd = make_dmabuf(width, height, &stride, &offset, &map_size);
     submit_dmabuf(app_fd, compositor_fd, params_id, buffer_id, width, height, drm_argb8888, buf_fd, offset, stride);
     ::close(buf_fd);
@@ -337,12 +336,12 @@ int main() {
     assert(skl::wcas::proxy::capture_dmabuf(state, image));
 
     // --- an unsupported single-plane format is rejected, not mis-decoded ---
-    const std::uint32_t bad_params = 22;
-    const std::uint32_t bad_buffer = 23;
+    const uint32_t bad_params = 22;
+    const uint32_t bad_buffer = 23;
     create_params(app_fd, compositor_fd, dmabuf_id, bad_params);
-    std::uint32_t bad_stride = 0;
-    std::uint32_t bad_offset = 0;
-    std::size_t bad_size = 0;
+    uint32_t bad_stride = 0;
+    uint32_t bad_offset = 0;
+    size_t bad_size = 0;
     const int bad_fd = make_dmabuf(width, height, &bad_stride, &bad_offset, &bad_size);
     submit_dmabuf(
         app_fd, compositor_fd, bad_params, bad_buffer, width, height, 0xdeadbeefu, bad_fd, bad_offset, bad_stride);
@@ -355,12 +354,12 @@ int main() {
     // happily return a plausible-looking picture. Only the modifier says the
     // real layout is not linear, so capture has to refuse rather than emit a
     // scrambled frame that looks like a successful screenshot.
-    const std::uint32_t tiled_params = 30;
-    const std::uint32_t tiled_buffer = 31;
+    const uint32_t tiled_params = 30;
+    const uint32_t tiled_buffer = 31;
     create_params(app_fd, compositor_fd, dmabuf_id, tiled_params);
-    std::uint32_t t_stride = 0;
-    std::uint32_t t_offset = 0;
-    std::size_t t_size = 0;
+    uint32_t t_stride = 0;
+    uint32_t t_offset = 0;
+    size_t t_size = 0;
     const int t_fd = make_dmabuf(width, height, &t_stride, &t_offset, &t_size);
     submit_dmabuf(app_fd, compositor_fd, tiled_params, tiled_buffer, width, height, drm_argb8888, t_fd, t_offset,
         t_stride, 0x00000001u, 0x00abcdefu);   // DRM_FORMAT_MOD_VENDOR|tiled
@@ -369,12 +368,12 @@ int main() {
     assert(!skl::wcas::proxy::capture_dmabuf(state, image));
 
     // --- but DRM_FORMAT_MOD_LINEAR | TILED is still a linear layout ---
-    const std::uint32_t linear_tiled_params = 32;
-    const std::uint32_t linear_tiled_buffer = 33;
+    const uint32_t linear_tiled_params = 32;
+    const uint32_t linear_tiled_buffer = 33;
     create_params(app_fd, compositor_fd, dmabuf_id, linear_tiled_params);
-    std::uint32_t lt_stride = 0;
-    std::uint32_t lt_offset = 0;
-    std::size_t lt_size = 0;
+    uint32_t lt_stride = 0;
+    uint32_t lt_offset = 0;
+    size_t lt_size = 0;
     const int lt_fd = make_dmabuf(width, height, &lt_stride, &lt_offset, &lt_size);
     submit_dmabuf(app_fd, compositor_fd, linear_tiled_params, linear_tiled_buffer, width, height, drm_argb8888, lt_fd,
         lt_offset, lt_stride, 0, 1);   // DRM_FORMAT_MOD_TILED on its own
@@ -393,12 +392,12 @@ int main() {
     }
 
     // --- a multi-plane buffer is rejected (needs GPU interop) ---
-    const std::uint32_t multi_params = 24;
-    const std::uint32_t multi_buffer = 25;
+    const uint32_t multi_params = 24;
+    const uint32_t multi_buffer = 25;
     create_params(app_fd, compositor_fd, dmabuf_id, multi_params);
-    std::uint32_t m_stride = 0;
-    std::uint32_t m_offset = 0;
-    std::size_t m_size = 0;
+    uint32_t m_stride = 0;
+    uint32_t m_offset = 0;
+    size_t m_size = 0;
     const int m_fd = make_dmabuf(width, height, &m_stride, &m_offset, &m_size);
     {
         // plane 0
@@ -424,8 +423,8 @@ int main() {
         // create_immed with a two-plane format
         auto create = message(multi_params, 3);
         put(create, multi_buffer);
-        put(create, static_cast<std::uint32_t>(width));
-        put(create, static_cast<std::uint32_t>(height));
+        put(create, static_cast<uint32_t>(width));
+        put(create, static_cast<uint32_t>(height));
         put(create, drm_nv12);
         put(create, 0);
         finish(create);
@@ -446,15 +445,15 @@ int main() {
         ::setenv("GBM_BACKEND", "nvidia-drm", 1);
         if (gbm_device *gbm = gbm_create_device(render_fd); gbm != nullptr) {
             if (gbm_bo *bo = gbm_bo_create(gbm, width, height, GBM_FORMAT_ARGB8888, GBM_BO_USE_LINEAR); bo != nullptr) {
-                const std::uint32_t g_stride = gbm_bo_get_stride(bo);
-                const std::uint32_t g_offset = gbm_bo_get_offset(bo, 0);
-                const std::uint64_t g_modifier = gbm_bo_get_modifier(bo);
+                const uint32_t g_stride = gbm_bo_get_stride(bo);
+                const uint32_t g_offset = gbm_bo_get_offset(bo, 0);
+                const uint64_t g_modifier = gbm_bo_get_modifier(bo);
                 void *map_data = nullptr;
-                std::uint32_t map_stride = 0;
+                uint32_t map_stride = 0;
                 if (void *ptr = gbm_bo_map(bo, 0, 0, width, height, GBM_BO_TRANSFER_WRITE, &map_stride, &map_data);
                     ptr != nullptr) {
                     for (int y = 0; y < height; ++y) {
-                        auto *row = static_cast<unsigned char *>(ptr) + static_cast<std::size_t>(y) * map_stride;
+                        auto *row = static_cast<unsigned char *>(ptr) + static_cast<size_t>(y) * map_stride;
                         for (int x = 0; x < width; ++x) {
                             const int i = y * width + x;
                             row[x * 4 + 0] = static_cast<unsigned char>(i);
@@ -473,7 +472,7 @@ int main() {
                     auto gpu_frame = skl::wcas::proxy::vulkan_import_dmabuf(
                         import_fd, width, height, g_stride, g_modifier, drm_argb8888, g_offset);
                     if (gpu_frame.has_value()) {
-                        assert(gpu_frame->pixels.size() == static_cast<std::size_t>(width) * height * 4u);
+                        assert(gpu_frame->pixels.size() == static_cast<size_t>(width) * height * 4u);
                         std::printf(
                             "dmabuf capture: Vulkan import verified (stride=%u offset=%u "
                             "modifier=0x%llx)\n",
@@ -483,8 +482,8 @@ int main() {
                     }
 
                     // The full protocol path must also capture the GPU buffer.
-                    const std::uint32_t g_params = 40;
-                    const std::uint32_t g_buffer = 41;
+                    const uint32_t g_params = 40;
+                    const uint32_t g_buffer = 41;
                     create_params(app_fd, compositor_fd, dmabuf_id, g_params);
                     submit_dmabuf(app_fd, compositor_fd, g_params, g_buffer, width, height, drm_argb8888, dmabuf_fd,
                         g_offset, g_stride);

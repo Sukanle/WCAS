@@ -4,11 +4,11 @@
 // point is to prove that DeviceInfo / PointerController / KeyboardController /
 // GamepadController can be implemented by a plain struct, bound independently,
 // and that an unimplemented capability fails cleanly.
-#include "skl/wcas/controller.h"
+#include "SKL/WCAS/Controller.h"
 
-#include <cassert>
+#include <assert.h>
 #include <chrono>
-#include <cstdio>
+#include <stdio.h>
 #include <string>
 
 namespace {

@@ -1,7 +1,7 @@
-#include "harness/focus_backend.h"
+#include "SKL/WCAS/Private/Harness/FocusBackend.h"
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
 #include <iterator>
 #include <string>
 
@@ -47,7 +47,7 @@ constexpr TypeId kFakeType = skl::abix::model::canonical_type_id("test::FakeFocu
 
 int main() {
     InterfaceRegistry<2> registry;
-    assert(registry.add({FocusBackendTraits::id, kFakeType, kMethods, static_cast<std::uint32_t>(std::size(kMethods)),
+    assert(registry.add({FocusBackendTraits::id, kFakeType, kMethods, static_cast<uint32_t>(std::size(kMethods)),
                FocusBackendTraits::version, 0})
            == InterfaceStatus::ok);
 

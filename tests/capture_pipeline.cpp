@@ -2,7 +2,7 @@
 // loop's periodic timer must drive the slot scheduler and publish the latest
 // frame into `ConnState::pre_captured_frame`, which `capture()` then returns.
 
-#include "proxy/conn.h"
+#include "SKL/WCAS/Private/Proxy/Conn.h"
 
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -10,11 +10,11 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <cassert>
+#include <assert.h>
 #include <chrono>
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -26,39 +26,39 @@
 namespace {
 
 using skl::wcas::proxy::ConnState;
-constexpr std::uint32_t drm_argb8888 = 0x34325241u;
+constexpr uint32_t drm_argb8888 = 0x34325241u;
 
-void put(std::vector<char> &message, std::uint32_t value) {
+void put(std::vector<char> &message, uint32_t value) {
     const auto at = message.size();
     message.resize(at + 4);
-    std::memcpy(message.data() + at, &value, 4);
+    memcpy(message.data() + at, &value, 4);
 }
-std::uint32_t get(const std::vector<char> &message, std::size_t at) {
-    std::uint32_t value = 0;
+uint32_t get(const std::vector<char> &message, size_t at) {
+    uint32_t value = 0;
     if (at + 4 > message.size()) return 0;
-    std::memcpy(&value, message.data() + at, 4);
+    memcpy(&value, message.data() + at, 4);
     return value;
 }
 void string_arg(std::vector<char> &message, const char *value) {
-    const auto length = static_cast<std::uint32_t>(std::strlen(value) + 1);
+    const auto length = static_cast<uint32_t>(strlen(value) + 1);
     put(message, length);
     const auto at = message.size();
     message.resize(at + ((length + 3u) & ~3u), 0);
-    std::memcpy(message.data() + at, value, length);
+    memcpy(message.data() + at, value, length);
 }
-std::vector<char> message(std::uint32_t object, std::uint16_t opcode) {
+std::vector<char> message(uint32_t object, uint16_t opcode) {
     std::vector<char> result(8);
-    std::memcpy(result.data(), &object, 4);
-    std::uint32_t header = opcode;
-    std::memcpy(result.data() + 4, &header, 4);
+    memcpy(result.data(), &object, 4);
+    uint32_t header = opcode;
+    memcpy(result.data() + 4, &header, 4);
     return result;
 }
 void finish(std::vector<char> &message) {
-    const auto size = static_cast<std::uint32_t>(message.size());
-    std::uint32_t header = 0;
-    std::memcpy(&header, message.data() + 4, 4);
+    const auto size = static_cast<uint32_t>(message.size());
+    uint32_t header = 0;
+    memcpy(&header, message.data() + 4, 4);
     header = (size << 16) | (header & 0xffffu);
-    std::memcpy(message.data() + 4, &header, 4);
+    memcpy(message.data() + 4, &header, 4);
 }
 void send_message(int fd, const std::vector<char> &message, int passed_fd = -1) {
     iovec iov{const_cast<char *>(message.data()), message.size()};
@@ -73,7 +73,7 @@ void send_message(int fd, const std::vector<char> &message, int passed_fd = -1) 
         header->cmsg_level = SOL_SOCKET;
         header->cmsg_type = SCM_RIGHTS;
         header->cmsg_len = CMSG_LEN(sizeof(int));
-        std::memcpy(CMSG_DATA(header), &passed_fd, sizeof(passed_fd));
+        memcpy(CMSG_DATA(header), &passed_fd, sizeof(passed_fd));
     }
     assert(::sendmsg(fd, &output, 0) == static_cast<ssize_t>(message.size()));
 }
@@ -87,9 +87,9 @@ std::vector<char> receive(int fd) {
     input.msg_control = control;
     input.msg_controllen = sizeof(control);
     assert(::recvmsg(fd, &input, MSG_WAITALL) == 8);
-    std::uint32_t wire_header = 0;
-    std::memcpy(&wire_header, bytes.data() + 4, sizeof(wire_header));
-    const auto message_size = static_cast<std::size_t>(wire_header >> 16);
+    uint32_t wire_header = 0;
+    memcpy(&wire_header, bytes.data() + 4, sizeof(wire_header));
+    const auto message_size = static_cast<size_t>(wire_header >> 16);
     assert(message_size >= 8 && (message_size & 3u) == 0);
     bytes.resize(message_size);
     if (message_size > 8)
@@ -97,16 +97,16 @@ std::vector<char> receive(int fd) {
     return bytes;
 }
 
-int make_linear_dmabuf(int width, int height, std::uint32_t *stride) {
-    *stride = static_cast<std::uint32_t>(width) * 4u;
-    const std::size_t size = static_cast<std::size_t>(*stride) * static_cast<std::size_t>(height);
+int make_linear_dmabuf(int width, int height, uint32_t *stride) {
+    *stride = static_cast<uint32_t>(width) * 4u;
+    const size_t size = static_cast<size_t>(*stride) * static_cast<size_t>(height);
     const int fd = ::memfd_create("wcas-pipeline-test", MFD_CLOEXEC);
     assert(fd >= 0);
     assert(::ftruncate(fd, static_cast<off_t>(size)) == 0);
     void *base = ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     assert(base != MAP_FAILED);
     for (int y = 0; y < height; ++y) {
-        auto *row = static_cast<unsigned char *>(base) + static_cast<std::size_t>(y) * *stride;
+        auto *row = static_cast<unsigned char *>(base) + static_cast<size_t>(y) * *stride;
         for (int x = 0; x < width; ++x) {
             const int i = y * width + x;
             row[x * 4 + 0] = static_cast<unsigned char>(i);
@@ -143,8 +143,8 @@ struct Fake {
     Fake &operator=(const Fake &) = delete;
 };
 
-std::uint32_t bind_global(int app_fd, int compositor_fd, std::uint32_t registry, std::uint32_t global, const char *name,
-    std::uint32_t app_object, std::uint32_t version = 1) {
+uint32_t bind_global(int app_fd, int compositor_fd, uint32_t registry, uint32_t global, const char *name,
+    uint32_t app_object, uint32_t version = 1) {
     auto bind = message(registry, 0);
     put(bind, global);
     string_arg(bind, name);
@@ -172,15 +172,15 @@ int main() {
     put(get_registry, 5);
     finish(get_registry);
     send_message(app_fd, get_registry);
-    const std::uint32_t registry_id = 5;
+    const uint32_t registry_id = 5;
     receive(compositor_fd);
 
-    const std::uint32_t compositor_id = 6;
-    const std::uint32_t dmabuf_id = 9;
+    const uint32_t compositor_id = 6;
+    const uint32_t dmabuf_id = 9;
     bind_global(app_fd, compositor_fd, registry_id, 11, "wl_compositor", compositor_id);
     bind_global(app_fd, compositor_fd, registry_id, 12, "zwp_linux_dmabuf_v1", dmabuf_id, 4);
 
-    const std::uint32_t surface_id = 7;
+    const uint32_t surface_id = 7;
     auto get_surface = message(compositor_id, 0);
     put(get_surface, surface_id);
     finish(get_surface);
@@ -189,15 +189,15 @@ int main() {
 
     const int width = 4;
     const int height = 3;
-    const std::uint32_t params_id = 20;
-    const std::uint32_t buffer_id = 21;
+    const uint32_t params_id = 20;
+    const uint32_t buffer_id = 21;
     auto create_params = message(dmabuf_id, 1);
     put(create_params, params_id);
     finish(create_params);
     send_message(app_fd, create_params);
     receive(compositor_fd);
 
-    std::uint32_t stride = 0;
+    uint32_t stride = 0;
     const int buf_fd = make_linear_dmabuf(width, height, &stride);
     auto add = message(params_id, 1);
     put(add, 0);
@@ -212,8 +212,8 @@ int main() {
 
     auto create = message(params_id, 3);
     put(create, buffer_id);
-    put(create, static_cast<std::uint32_t>(width));
-    put(create, static_cast<std::uint32_t>(height));
+    put(create, static_cast<uint32_t>(width));
+    put(create, static_cast<uint32_t>(height));
     put(create, drm_argb8888);
     put(create, 0);
     finish(create);

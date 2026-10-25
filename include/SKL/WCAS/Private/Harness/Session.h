@@ -1,0 +1,61 @@
+#pragma once
+
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "SKL/WCAS/Private/Proxy/Conn.h"
+
+namespace skl::wcas::detail {
+
+/// Locate the proxy session belonging to `pid` or one of its descendants,
+/// preferring a connection that already has a capturable surface. A launched
+/// umu/Wine app opens several Wayland connections (launcher CEF, helpers, the
+/// game), so the capturable one is the useful match.
+///
+/// When `match_regex` is non-empty, a session also matches if the owner's
+/// command line / executable path matches it. That fallback is not optional
+/// for umu/Proton: the connecting process is `wineserver`, which detaches, so
+/// once an intermediate launcher exits the owner is re-parented to init and the
+/// ancestor chain no longer reaches `pid` — the pid-only test silently failed
+/// and timed out the native launch even though the session was right there.
+std::shared_ptr<proxy::ConnState> session_for(pid_t pid, const std::string &match_regex = {});
+
+/// All sessions belonging to `pid` or its descendants. When `match_regex` is
+/// non-empty, also include sessions whose owner's command line / executable
+/// path (normalised `\\` -> `/`) matches it — this catches child windows that
+/// are launched later and re-parented out of the tree.
+std::vector<std::shared_ptr<proxy::ConnState>> sessions_for(pid_t pid, const std::string &match_regex);
+
+/// Diagnostic snapshot of every registered session (including disconnected /
+/// unmatched ones) for the `sessions` CLI command.
+struct SessionStatus {
+    long owner_pid = 0;
+    bool connected = false;
+    bool matched = false;
+    size_t windows = 0;
+    size_t surfaces = 0;
+    size_t toplevels = 0;
+    bool has_keyboard = false;
+    bool has_pointer = false;
+    bool has_keymap = false;
+    /// Command line + executable of the owning process, so callers can tell
+    /// which connection a session belongs to (the game vs a helper/CEF).
+    std::string command;
+};
+std::vector<SessionStatus> session_status(pid_t root, const std::string &match_regex);
+
+/// Register / remove a proxy session. Sessions are keyed per *connection*, not
+/// per process: one process (Wine/winewayland) can open several Wayland
+/// connections, each carrying its own windows, and keying by pid would drop all
+/// but the last.
+void register_session(pid_t pid, const std::shared_ptr<proxy::ConnState> &state);
+void erase_session(const std::shared_ptr<proxy::ConnState> &state);
+/// Remove every session owned by `pid` (used on shutdown).
+void erase_sessions_for(pid_t pid);
+
+/// SIGINT -> bounded wait -> SIGTERM -> SIGKILL a process group and reap the
+/// leader process.
+void terminate_group(pid_t pid) noexcept;
+
+}   // namespace skl::wcas::detail

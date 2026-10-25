@@ -7,4 +7,3 @@
 [submodule "third_party/ABIX"]
 	path = third_party/ABIX
 	url = git@github.com:sukanle/ABIX.git
-	branch = v0.2.2

@@ -1,10 +1,10 @@
 // Compile/contract check for the X11 input provider. Actual XTest injection is
 // environment-dependent; this test only pins the provider surface and the
 // no-display failure behavior.
-#include "harness/x11_input.h"
+#include "SKL/WCAS/Private/Harness/X11Input.h"
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
 
 using namespace skl::wcas;
 

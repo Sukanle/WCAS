@@ -6,24 +6,29 @@
 // the proxy uses) and handed over as a real SCM_RIGHTS fd, so the keycode
 // assertions exercise the production resolution path rather than a fixture.
 
-#include "proxy/conn.h"
-#include "proxy/input.h"
-#include "proxy/keymap.h"
-#include "proxy/keysym.h"
+#include "SKL/WCAS/Private/Proxy/Conn.h"
+#include "SKL/WCAS/Private/Proxy/Input.h"
+#include "SKL/WCAS/Private/Proxy/Keymap.h"
+#include "SKL/WCAS/Private/Proxy/Keysym.h"
 
-#include <xkbcommon/xkbcommon.h>
+#ifdef _WIN32
+#else
+#  include <fcntl.h>
+#  include <unistd.h>
+#  include <sys/mman.h>
+#  include <sys/poll.h>
+#  include <sys/socket.h>
+#  ifdef __linux
+#    include <xkbcommon/xkbcommon.h>
+#  endif
+#endif
 
-#include <sys/mman.h>
-#include <sys/socket.h>
-#include <poll.h>
-#include <fcntl.h>
-#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <stdint.h>
 
-#include <cassert>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
@@ -33,37 +38,37 @@ namespace {
 
 using skl::wcas::proxy::ConnState;
 
-void put(std::vector<char> &message, std::uint32_t value) {
+void put(std::vector<char> &message, uint32_t value) {
     const auto at = message.size();
     message.resize(at + 4);
-    std::memcpy(message.data() + at, &value, 4);
+    memcpy(message.data() + at, &value, 4);
 }
-std::uint32_t get(const std::vector<char> &message, std::size_t at) {
-    std::uint32_t value = 0;
+uint32_t get(const std::vector<char> &message, size_t at) {
+    uint32_t value = 0;
     if (at + 4 > message.size()) return 0;
-    std::memcpy(&value, message.data() + at, 4);
+    memcpy(&value, message.data() + at, 4);
     return value;
 }
 void string_arg(std::vector<char> &message, const char *value) {
-    const auto length = static_cast<std::uint32_t>(std::strlen(value) + 1);
+    const auto length = static_cast<uint32_t>(strlen(value) + 1);
     put(message, length);
     const auto at = message.size();
     message.resize(at + ((length + 3u) & ~3u), 0);
-    std::memcpy(message.data() + at, value, length);
+    memcpy(message.data() + at, value, length);
 }
-std::vector<char> message(std::uint32_t object, std::uint16_t opcode) {
+std::vector<char> message(uint32_t object, uint16_t opcode) {
     std::vector<char> result(8);
-    std::memcpy(result.data(), &object, 4);
-    std::uint32_t header = opcode;
-    std::memcpy(result.data() + 4, &header, 4);
+    memcpy(result.data(), &object, 4);
+    uint32_t header = opcode;
+    memcpy(result.data() + 4, &header, 4);
     return result;
 }
 void finish(std::vector<char> &message) {
-    const auto size = static_cast<std::uint32_t>(message.size());
-    std::uint32_t header = 0;
-    std::memcpy(&header, message.data() + 4, 4);
+    const auto size = static_cast<uint32_t>(message.size());
+    uint32_t header = 0;
+    memcpy(&header, message.data() + 4, 4);
     header = (size << 16) | (header & 0xffffu);
-    std::memcpy(message.data() + 4, &header, 4);
+    memcpy(message.data() + 4, &header, 4);
 }
 void send_message(int fd, const std::vector<char> &message, int passed_fd = -1) {
     iovec iov{const_cast<char *>(message.data()), message.size()};
@@ -78,7 +83,7 @@ void send_message(int fd, const std::vector<char> &message, int passed_fd = -1) 
         header->cmsg_level = SOL_SOCKET;
         header->cmsg_type = SCM_RIGHTS;
         header->cmsg_len = CMSG_LEN(sizeof(int));
-        std::memcpy(CMSG_DATA(header), &passed_fd, sizeof(passed_fd));
+        memcpy(CMSG_DATA(header), &passed_fd, sizeof(passed_fd));
     }
     assert(::sendmsg(fd, &output, 0) == static_cast<ssize_t>(message.size()));
 }
@@ -99,9 +104,9 @@ std::vector<char> try_receive(int fd, int *received_fd = nullptr) {
     input.msg_controllen = sizeof(control);
     const auto header_size = ::recvmsg(fd, &input, MSG_WAITALL);
     if (header_size != 8) return {};
-    std::uint32_t wire_header = 0;
-    std::memcpy(&wire_header, bytes.data() + 4, sizeof(wire_header));
-    const auto message_size = static_cast<std::size_t>(wire_header >> 16);
+    uint32_t wire_header = 0;
+    memcpy(&wire_header, bytes.data() + 4, sizeof(wire_header));
+    const auto message_size = static_cast<size_t>(wire_header >> 16);
     if (message_size < 8 || (message_size & 3u) != 0) return {};
     bytes.resize(message_size);
     if (message_size > 8
@@ -111,7 +116,7 @@ std::vector<char> try_receive(int fd, int *received_fd = nullptr) {
         *received_fd = -1;
         for (auto *header = CMSG_FIRSTHDR(&input); header; header = CMSG_NXTHDR(&input, header)) {
             if (header->cmsg_level == SOL_SOCKET && header->cmsg_type == SCM_RIGHTS) {
-                std::memcpy(received_fd, CMSG_DATA(header), sizeof(int));
+                memcpy(received_fd, CMSG_DATA(header), sizeof(int));
                 break;
             }
         }
@@ -131,9 +136,9 @@ std::vector<char> receive(int fd, int *received_fd = nullptr) {
     input.msg_control = control;
     input.msg_controllen = sizeof(control);
     assert(::recvmsg(fd, &input, MSG_WAITALL) == 8);
-    std::uint32_t wire_header = 0;
-    std::memcpy(&wire_header, bytes.data() + 4, sizeof(wire_header));
-    const auto message_size = static_cast<std::size_t>(wire_header >> 16);
+    uint32_t wire_header = 0;
+    memcpy(&wire_header, bytes.data() + 4, sizeof(wire_header));
+    const auto message_size = static_cast<size_t>(wire_header >> 16);
     assert(message_size >= 8 && (message_size & 3u) == 0);
     bytes.resize(message_size);
     if (message_size > 8)
@@ -141,7 +146,7 @@ std::vector<char> receive(int fd, int *received_fd = nullptr) {
     if (received_fd) {
         for (auto *header = CMSG_FIRSTHDR(&input); header; header = CMSG_NXTHDR(&input, header)) {
             if (header->cmsg_level == SOL_SOCKET && header->cmsg_type == SCM_RIGHTS) {
-                std::memcpy(received_fd, CMSG_DATA(header), sizeof(int));
+                memcpy(received_fd, CMSG_DATA(header), sizeof(int));
                 break;
             }
         }
@@ -173,19 +178,18 @@ std::string system_keymap_text() {
     return result;
 }
 
-int keymap_fd_for(const std::string &text, std::uint32_t *size) {
+int keymap_fd_for(const std::string &text, uint32_t *size) {
     const int fd = ::memfd_create("wcas-keymap-test", MFD_CLOEXEC);
     assert(fd >= 0);
     const auto bytes = text.size() + 1;
     assert(::ftruncate(fd, static_cast<off_t>(bytes)) == 0);
     assert(::pwrite(fd, text.c_str(), bytes, 0) == static_cast<ssize_t>(bytes));
-    *size = static_cast<std::uint32_t>(bytes);
+    *size = static_cast<uint32_t>(bytes);
     return fd;
 }
 
 /// Global announcement from the fake compositor.
-void announce_global(
-    int compositor_fd, std::uint32_t registry, std::uint32_t global, const char *name, std::uint32_t version) {
+void announce_global(int compositor_fd, uint32_t registry, uint32_t global, const char *name, uint32_t version) {
     auto event = message(registry, 0);
     put(event, global);
     string_arg(event, name);
@@ -195,8 +199,8 @@ void announce_global(
 }
 
 /// Registry bind from the app; returns the upstream object id the proxy chose.
-std::uint32_t bind_global(int app_fd, int compositor_fd, std::uint32_t registry, std::uint32_t global, const char *name,
-    std::uint32_t app_object, std::uint32_t version = 1) {
+uint32_t bind_global(int app_fd, int compositor_fd, uint32_t registry, uint32_t global, const char *name,
+    uint32_t app_object, uint32_t version = 1) {
     // wl_registry.bind is `usun`: name(uint), interface(string), version(uint),
     // id(new_id). The version argument is mandatory on the wire.
     auto bind = message(registry, 0);
@@ -258,14 +262,14 @@ int main() {
     put(get_registry, 5);
     finish(get_registry);
     send_message(app_fd, get_registry);
-    const std::uint32_t registry_id = 5;
+    const uint32_t registry_id = 5;
     const auto forwarded_registry = receive(compositor_fd);
     const auto upstream_registry = get(forwarded_registry, 8);
     assert(upstream_registry == registry_id);
 
-    const std::uint32_t compositor_id = 6;
-    const std::uint32_t shm_id = 8;
-    const std::uint32_t seat_id = 10;
+    const uint32_t compositor_id = 6;
+    const uint32_t shm_id = 8;
+    const uint32_t seat_id = 10;
     const auto upstream_compositor =
         bind_global(app_fd, compositor_fd, registry_id, 11, "wl_compositor", compositor_id);
     const auto upstream_shm = bind_global(app_fd, compositor_fd, registry_id, 12, "wl_shm", shm_id);
@@ -275,8 +279,8 @@ int main() {
     // wl_seat.get_pointer / get_keyboard create the objects the proxy injects
     // events on. The proxy records them from the request, so no server event
     // is needed.
-    const std::uint32_t pointer_id = 21;
-    const std::uint32_t keyboard_id = 22;
+    const uint32_t pointer_id = 21;
+    const uint32_t keyboard_id = 22;
     auto get_pointer = message(seat_id, 0);
     put(get_pointer, pointer_id);
     finish(get_pointer);
@@ -294,7 +298,7 @@ int main() {
     assert(upstream_keyboard == keyboard_id);
 
     // wl_keyboard.keymap(format, fd, size) from the compositor.
-    std::uint32_t keymap_size = 0;
+    uint32_t keymap_size = 0;
     const int keymap_fd = keymap_fd_for(keymap_text, &keymap_size);
     auto keymap_event = message(upstream_keyboard, 0);
     put(keymap_event, 1);             // WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
@@ -313,7 +317,7 @@ int main() {
     assert(state->keymap_fd >= 0);
 
     // --- a committed surface for input to be routed to ---
-    const std::uint32_t surface_id = 7;
+    const uint32_t surface_id = 7;
     (void)upstream_compositor;
     auto get_surface = message(compositor_id, 0);
     put(get_surface, surface_id);
@@ -388,9 +392,9 @@ int main() {
     // The app creates a zwp_relative_pointer_v1 through the manager; the proxy
     // records its role and can then inject relative_motion deltas, which is what
     // a press-and-drag on a locked pointer actually drives the camera with.
-    const std::uint32_t relative_manager_id = 13;
+    const uint32_t relative_manager_id = 13;
     bind_global(app_fd, compositor_fd, registry_id, 15, "zwp_relative_pointer_manager_v1", relative_manager_id);
-    const std::uint32_t relative_pointer_id = 40;
+    const uint32_t relative_pointer_id = 40;
     auto get_relative = message(relative_manager_id, 1);   // get_relative_pointer(new_id, pointer); destroy is opcode 0
     put(get_relative, relative_pointer_id);
     put(get_relative, pointer_id);
@@ -402,9 +406,9 @@ int main() {
     assert(skl::wcas::proxy::inject_relative_motion(state, 3.0, -4.0));
     const auto relative_motion = receive(compositor_fd);
     assert(get(relative_motion, 0) == relative_pointer_id);
-    assert((get(relative_motion, 4) & 0xffffu) == 0);   // zwp_relative_pointer_v1.relative_motion
-    assert(get(relative_motion, 16) == 3 * 256);        // dx
-    assert(static_cast<std::int32_t>(get(relative_motion, 20)) == -4 * 256);   // dy
+    assert((get(relative_motion, 4) & 0xffffu) == 0);                     // zwp_relative_pointer_v1.relative_motion
+    assert(get(relative_motion, 16) == 3 * 256);                          // dx
+    assert(static_cast<int32_t>(get(relative_motion, 20)) == -4 * 256);   // dy
 
     assert(skl::wcas::proxy::inject_pointer_axis_source(state, 0));
     const auto axis_source = receive(compositor_fd);
@@ -460,11 +464,11 @@ int main() {
     // --- type_text with text-input-v3 enabled: commit_string + done ---
     // Create the text-input object through the normal protocol path so the
     // proxy has an app/upstream object mapping for injected messages.
-    const std::uint32_t text_input_manager_id = 12;
+    const uint32_t text_input_manager_id = 12;
     const auto upstream_text_manager =
         bind_global(app_fd, compositor_fd, registry_id, 14, "zwp_text_input_manager_v3", text_input_manager_id);
     assert(upstream_text_manager == text_input_manager_id);
-    const std::uint32_t text_input_id = 30;
+    const uint32_t text_input_id = 30;
     auto get_text_input = message(text_input_manager_id, 1);
     put(get_text_input, text_input_id);
     put(get_text_input, surface_id);
@@ -481,7 +485,7 @@ int main() {
     assert(get(commit_event, 0) == upstream_text_input);
     assert((get(commit_event, 4) & 0xffffu) == 3);   // commit_string
     assert(get(commit_event, 8) == 6);               // "cafe" + UTF-8 e-acute + NUL
-    assert(std::memcmp(commit_event.data() + 12, "caf\xc3\xa9", 5) == 0);
+    assert(memcmp(commit_event.data() + 12, "caf\xc3\xa9", 5) == 0);
     const auto done_event = receive(compositor_fd);
     assert(get(done_event, 0) == upstream_text_input);
     assert((get(done_event, 4) & 0xffffu) == 5);   // done

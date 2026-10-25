@@ -1,10 +1,10 @@
 // Contract test for the DMA-BUF decoder interface. Actual Vulkan/EGL paths are
 // hardware/environment dependent; this test pins the provider/binding shape and
 // the decode result contract.
-#include "proxy/dmabuf_decoder.h"
+#include "SKL/WCAS/Private/Proxy/DMABUF/Decoder.h"
 
-#include <cassert>
-#include <cstdio>
+#include <assert.h>
+#include <stdio.h>
 #include <iterator>
 #include <string>
 
@@ -46,7 +46,7 @@ constexpr TypeId kFakeType = skl::abix::model::canonical_type_id("test::FakeDmaB
 int main() {
     InterfaceRegistry<4> registry;
     const auto status = registry.add({DmaBufDecoderTraits::id, kFakeType, kMethods,
-        static_cast<std::uint32_t>(std::size(kMethods)), DmaBufDecoderTraits::version, 0});
+        static_cast<uint32_t>(std::size(kMethods)), DmaBufDecoderTraits::version, 0});
     assert(status == InterfaceStatus::ok);
 
     FakeDecoder provider;

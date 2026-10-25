@@ -1,4 +1,4 @@
-#include "skl/wcas/wcas.h"
+#include "SKL/WCAS/WCAS.h"
 #include <opencv2/imgcodecs.hpp>
 #include <fmt/std.h>
 int main(int argc, char **argv) {

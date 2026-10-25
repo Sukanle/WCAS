@@ -2,11 +2,11 @@
 // (an XWayland or plain X server) via XComposite + XGetImage and requires a
 // non-empty frame. Skips cleanly when no X display is configured.
 
-#include "x11_capture.h"
+#include "SKL/WCAS/Private/X11Capture.h"
 
-#include <cassert>
-#include <cstdio>
-#include <cstdlib>
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 int main() {
     const char *display = std::getenv("DISPLAY");
