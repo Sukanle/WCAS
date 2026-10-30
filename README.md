@@ -371,6 +371,45 @@ block-linear，甚至带帧缓冲压缩）。WCAS 用环境变量选择解码后
 KMS 裁剪读取合成结果，不会返回整屏或多显示器拼接。完整判定与能力查询见
 [docs/CAPTURE.md](docs/CAPTURE.md)。
 
+### 7.4 IPC 会话（MAA 接管）
+
+`proton-inject.sh` 默认以 `--serve` 启动一个常驻会话，并通过 Unix domain socket 暴露
+控制接口；这样用户从快捷方式启动游戏后，MAA 等外部程序可以 attach，而不需要自己重新
+启动游戏。
+
+```sh
+# 默认：serve 模式（不读 stdin，适合快捷方式）
+./proton-inject.sh game.exe
+
+# 交互调试；或显式禁用 serve
+./proton-inject.sh game.exe --cli
+./proton-inject.sh game.exe --no-serve
+
+# 自定义 socket / 脱离终端
+./proton-inject.sh game.exe --socket /run/user/1000/wcas/my.sock --detach
+```
+
+客户端：
+
+```sh
+wcasctl list                               # 列出活动 socket
+wcasctl status                             # pid/frame/windows/transport
+wcasctl windows                            # 窗口列表
+wcasctl capture --out shot.png             # PNG 截图
+wcasctl click 640 360                      # frame 坐标
+wcasctl move 640 360
+wcasctl key ctrl+a
+wcasctl type hello
+wcasctl stop                               # 结束受控游戏
+```
+
+socket 默认位于 `$XDG_RUNTIME_DIR/wcas/<pid>.sock`，`latest` 指向最近会话；连接使用
+`SO_PEERCRED` 校验同 UID，目录 0700、socket 0600。协议为长度前缀 JSON；截图当前以
+PNG + base64 返回，后续再加 memfd/共享内存。
+
+键盘注入需要目标窗口获得键盘焦点；若窗口不接收键盘，可在启动时加
+`--allow-activation`，或先用 `move/click` 激活目标窗口。
+
 ## 八、现有问题
 
 ### 8.1 明日方舟（手游移植）按键无效
