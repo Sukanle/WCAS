@@ -26,6 +26,11 @@ public:
 
     [[nodiscard]] bool alive() const {
         if (!state_) return false;
+        // A connected proxy session is the strongest liveness signal: with
+        // Proton/umu the direct child (launcher) may exit while the game keeps
+        // running under a descendant.
+        if (state_->session && state_->session->connected.load()) return true;
+        if (state_->transport == Transport::xwayland && state_->bridge && state_->bridge->running()) return true;
         if (state_->process_handle) return state_->process_handle->alive();
         return state_->child > 0;
     }

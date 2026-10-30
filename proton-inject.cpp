@@ -1,12 +1,17 @@
 #include "SKL/WCAS/WCAS.h"
 #include "SKL/WCAS/DMABUF.h"
+#include "SKL/WCAS/Private/IPC/Protocol.h"
+#include "SKL/WCAS/Private/IPC/Server.h"
 
 #include <opencv2/imgcodecs.hpp>
+#include <boost/json.hpp>
 #include <boost/program_options.hpp>
 #include <cmdly/terminal.h>
 #include <fmt/std.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 #include <ctype.h>
 #include <chrono>
 #include <stdio.h>
@@ -66,6 +71,9 @@ struct Options {
     std::string program;
     std::string mode = "native";
     bool cli = false;
+    bool serve = false;
+    bool detach = false;
+    std::string socket_path;
     bool allow_activation = false;
     double key_delay = 0.0;
     std::string output_monitor;
@@ -106,7 +114,8 @@ optional<GraphicsApi> parse_graphics_api(const std::string &value) {
 void print_usage() {
     fmt::println(
         "usage: proton-inject --program EXEC [--arg ARG] "
-        "[--proton|--wine|--umu] [--cli] [--capture-backend B] [--debug-all] "
+        "[--proton|--wine|--umu] [--cli] [--serve [--socket PATH] [--detach]] "
+        "[--capture-backend B] [--debug-all] "
         "[--native-timeout SEC] [--output-dir DIR] [--test-dmabuf FD]");
 }
 
@@ -256,6 +265,10 @@ optional<int> parse_arguments(int argc, char **argv, Options &options) {
         ("arg,s", po::value<std::vector<std::string>>(&options.args), "argument passed to the program (repeatable)")
         ("env,e", po::value<std::vector<std::string>>(&env_entries), "environment variable KEY=VALUE (repeatable)")
         ("cli,c", po::bool_switch(&options.cli), "use CLI mode")
+        ("serve", po::bool_switch(&options.serve), "run as an IPC session host (does not read stdin)")
+        ("detach", po::bool_switch(&options.detach), "detach from the controlling terminal (setsid)")
+        ("socket", po::value<std::string>(&options.socket_path),
+            "IPC socket path (default: $XDG_RUNTIME_DIR/wcas/<pid>.sock)")
         ("allow-activation", po::bool_switch(&options.allow_activation),
             "forward the selected window's activation so it accepts keyboard input (steals focus)")
         ("key-delay", po::value<double>(&options.key_delay)->default_value(0.0),
@@ -340,7 +353,6 @@ optional<int> parse_arguments(int argc, char **argv, Options &options) {
 struct Session {
     ComputerUse harness;
     ControlledApp app;
-    Controller controller;
 };
 
 LaunchConfig make_launch_config(const Options &options) {
@@ -385,34 +397,10 @@ optional<Session> launch_session(const Options &options) {
     app.set_capture_backend(options.capture_backend);
     app.set_allow_activation(options.allow_activation);
 
-    auto controller_result = app.controller();
-    if (!controller_result) {
-        fmt::println("controller: {}", controller_result.error().message());
-        return std::nullopt;
-    }
-
-    // Optionally move the app's windows onto a specific Hyprland monitor. The
-    // window may not exist immediately, so poll briefly for one.
-    // if (!options.output_monitor.empty()) {
-    //     for (int attempt = 0; attempt < 40; ++attempt) {
-    //         std::string cls;
-    //         for (const auto &w : app.windows()) {
-    //             if (!w.app_id.empty()) {
-    //                 cls = w.app_id;
-    //                 break;
-    //             }
-    //         }
-    //         if (!cls.empty()) {
-    //             const int rc = hyprctl_move_to_monitor(cls, options.output_monitor);
-    //             fmt::println("output: moved '{}' to {} ({})", cls, options.output_monitor,
-    //                 rc == 0 ? "ok" : "failed");
-    //             break;
-    //         }
-    //         std::this_thread::sleep_for(std::chrono::milliseconds(250));
-    //     }
-    // }
-
-    return Session{std::move(harness.value()), std::move(app), std::move(controller_result.value())};
+    // Build the Session first; the Controller is created by Shell after the
+    // final move, because it stores a pointer to ControlledApp. Creating it
+    // before moving the app (or the Session) leaves a dangling pointer.
+    return Session{std::move(harness.value()), std::move(app)};
 }
 
 // ── interactive shell ───────────────────────────────────────────────────────
@@ -435,6 +423,7 @@ public:
     Shell(Session session, Options options);
 
     void run();
+    void serve();
 
 private:
     using Handler = void (Shell::*)(std::istringstream &);
@@ -450,6 +439,7 @@ private:
     bool dispatch(const std::string &command, std::istringstream &input);
     void create_terminal();
     void print_startup() const;
+    boost::json::object handle_ipc(const boost::json::object &request);
 
     // cursor and frame bookkeeping
     void refresh_frame_size();
@@ -498,6 +488,8 @@ private:
 
     Session session_;
     Options options_;
+    Controller controller_;
+    std::string ipc_path_;
     cv::Size frame_;
     unsigned screenshot_ = 0;
     double mouse_x_ = -1;
@@ -552,7 +544,14 @@ const Shell::CommandSpec Shell::commands_[] = {
 
 Shell::Shell(Session session, Options options)
     : session_(std::move(session))
-    , options_(std::move(options)) {}
+    , options_(std::move(options)) {
+    auto result = session_.app.controller();
+    if (result) {
+        controller_ = std::move(result.value());
+    } else {
+        fmt::println(stderr, "controller: {}", result.error().message());
+    }
+}
 
 void Shell::run() {
     print_startup();
@@ -562,8 +561,16 @@ void Shell::run() {
     while (session_.app.is_alive()) {
         if (terminal_)
             line = terminal_->readLine("wcas> ");
-        else if (!std::getline(std::cin, line))
+        else if (!std::getline(std::cin, line)) {
+            // A desktop shortcut has no terminal and stdin is usually /dev/null.
+            // Do not interpret EOF as "quit" unless the caller explicitly asked
+            // for CLI mode; otherwise keep supervising the game until it exits.
+            if (!options_.cli) {
+                while (session_.app.is_alive())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
             break;
+        }
 
         std::istringstream input(line);
         std::string command;
@@ -574,6 +581,186 @@ void Shell::run() {
     }
 
     session_.app.stop();
+}
+
+void Shell::serve() {
+    std::string path = options_.socket_path.empty() ? ipc::default_socket_path() : options_.socket_path;
+    if (path.empty()) {
+        fmt::println(stderr, "ipc: XDG_RUNTIME_DIR is not set and no --socket was provided");
+        session_.app.stop();
+        return;
+    }
+    ipc_path_ = path;
+    ipc::IpcServer server(std::move(path), [this](const boost::json::object &request) { return handle_ipc(request); });
+    std::string error;
+    if (!server.start(error)) {
+        fmt::println(stderr, "ipc: {}", error);
+        session_.app.stop();
+        return;
+    }
+    ipc_path_ = server.path();
+    fmt::println("IPC listening on {}", ipc_path_);
+    while (session_.app.is_alive())
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    server.stop();
+    if (session_.app.is_alive()) session_.app.stop();
+}
+
+boost::json::object Shell::handle_ipc(const boost::json::object &request) {
+    using boost::json::array;
+    using boost::json::object;
+
+    const auto *method_it = request.find("method");
+    if (method_it == request.end() || !method_it->value().is_string()) return ipc::error(-32'600, "missing method");
+
+    const std::string method(method_it->value().as_string());
+    object params;
+    if (const auto *params_it = request.find("params"); params_it != request.end() && params_it->value().is_object())
+        params = params_it->value().as_object();
+
+    const auto number = [&params](std::string_view key, double fallback) {
+        const auto *it = params.find(key);
+        return it == params.end() ? fallback : it->value().to_number<double>();
+    };
+    const auto text = [&params](std::string_view key) -> std::string {
+        const auto *it = params.find(key);
+        return it == params.end() ? std::string{} : std::string(it->value().as_string());
+    };
+    const auto ok = [](boost::json::value result = boost::json::object{}) { return ipc::success(std::move(result)); };
+    const auto fail = [](int code, std::string message) { return ipc::error(code, std::move(message)); };
+
+    if (method == "hello") {
+        object result;
+        result["protocol"] = ipc::kProtocolVersion;
+        result["pid"] = session_.app.pid();
+        result["transport"] = session_.app.transport() == Transport::xwayland ? "xwayland" : "native_wayland";
+        result["socket"] = ipc_path_;
+        array capabilities;
+        for (const char *capability : {"capture", "input", "pointer", "keyboard", "windows", "stop"}) {
+            capabilities.emplace_back(capability);
+        }
+        result["capabilities"] = std::move(capabilities);
+        refresh_frame_size();
+        if (frame_.width > 0 && frame_.height > 0) {
+            result["frame"] = object{
+                { "width",  frame_.width},
+                {"height", frame_.height}
+            };
+        }
+        const auto windows = session_.app.windows();
+        if (!windows.empty()) result["app_id"] = windows.front().app_id;
+        return ok(std::move(result));
+    }
+
+    if (method == "status") {
+        refresh_frame_size();
+        const auto windows = session_.app.windows();
+        object result;
+        result["pid"] = session_.app.pid();
+        result["alive"] = session_.app.is_alive();
+        result["transport"] = session_.app.transport() == Transport::xwayland ? "xwayland" : "native_wayland";
+        result["commit"] = session_.app.total_commit_count();
+        result["frames"] = session_.app.presented_frames();
+        result["windows"] = static_cast<std::uint64_t>(windows.size());
+        result["socket"] = ipc_path_;
+        if (frame_.width > 0 && frame_.height > 0) {
+            result["frame"] = object{
+                { "width",  frame_.width},
+                {"height", frame_.height}
+            };
+        }
+        return ok(std::move(result));
+    }
+
+    if (method == "capture") {
+        auto captured = session_.app.capture();
+        if (!captured) return fail(-32'001, captured.error().message());
+        std::vector<unsigned char> encoded;
+        if (!cv::imencode(".png", captured.value(), encoded)) return fail(-32'002, "PNG encoding failed");
+        frame_ = cv::Size(captured.value().cols, captured.value().rows);
+        object result;
+        result["format"] = "png";
+        result["width"] = frame_.width;
+        result["height"] = frame_.height;
+        result["data"] =
+            ipc::base64_encode(std::string_view(reinterpret_cast<const char *>(encoded.data()), encoded.size()));
+        return ok(std::move(result));
+    }
+
+    if (method == "pointer.move" || method == "pointer.click") {
+        refresh_frame_size();
+        const double x = clamp_axis(number("x", frame_.width / 2.0), frame_.width);
+        const double y = clamp_axis(number("y", frame_.height / 2.0), frame_.height);
+        auto result = method == "pointer.click" ? controller_.click({x, y}) : controller_.move({x, y});
+        if (!result) return fail(-32'003, result.error().message());
+        mouse_x_ = x;
+        mouse_y_ = y;
+        cursor_is_device_ = false;
+        return ok();
+    }
+
+    if (method == "pointer.scroll") {
+        refresh_frame_size();
+        const double x = clamp_axis(number("x", frame_.width / 2.0), frame_.width);
+        const double y = clamp_axis(number("y", frame_.height / 2.0), frame_.height);
+        const int dx = static_cast<int>(number("dx", 0.0));
+        const int dy = static_cast<int>(number("dy", 0.0));
+        auto result = controller_.scroll({x, y}, {dx, dy});
+        if (!result) return fail(-32'003, result.error().message());
+        return ok();
+    }
+
+    if (method == "key") {
+        const std::string combination = text("combo");
+        if (combination.empty()) return fail(-32'602, "missing combo");
+        const auto hold = std::chrono::milliseconds(static_cast<int>(number("hold_ms", 50.0)));
+        auto result = controller_.key(combination, hold);
+        if (!result) return fail(-32'003, result.error().message());
+        return ok();
+    }
+
+    if (method == "type") {
+        const std::string value = text("text");
+        if (value.empty()) return fail(-32'602, "missing text");
+        auto result = controller_.type_text(value);
+        if (!result) return fail(-32'003, result.error().message());
+        return ok();
+    }
+
+    if (method == "window.list") {
+        const auto windows = session_.app.windows();
+        array result;
+        for (std::size_t index = 0; index < windows.size(); ++index) {
+            const auto &window = windows[index];
+            object item;
+            item["index"] = static_cast<std::uint64_t>(index);
+            item["app_id"] = window.app_id;
+            item["title"] = window.title;
+            item["width"] = window.width;
+            item["height"] = window.height;
+            item["pid"] = window.pid;
+            item["selected"] = window.selected;
+            result.emplace_back(std::move(item));
+        }
+        return ok(boost::json::value(std::move(result)));
+    }
+
+    if (method == "window.select") {
+        const int index = static_cast<int>(number("index", -1.0));
+        if (index < 0) return fail(-32'602, "missing index");
+        auto result = session_.app.select_window(index);
+        if (!result) return fail(-32'004, result.error().message());
+        return ok();
+    }
+
+    if (method == "stop") {
+        session_.app.stop();
+        return ok();
+    }
+
+    if (method == "ping") return ok();
+
+    return fail(-32'601, "method not found: " + method);
 }
 
 bool Shell::dispatch(const std::string &command, std::istringstream &input) {
@@ -685,7 +872,7 @@ void Shell::sleep_for_key_delay() const {
 
 void Shell::move_cursor() {
     const auto barrier = frame_barrier();
-    auto result = session_.controller.move({mouse_x_, mouse_y_});
+    auto result = controller_.move({mouse_x_, mouse_y_});
     if (!result) {
         report_error(result.error());
         return;
@@ -696,7 +883,7 @@ void Shell::move_cursor() {
 
 void Shell::move_to(double x, double y) {
     const auto barrier = frame_barrier();
-    auto result = session_.controller.move({x, y});
+    auto result = controller_.move({x, y});
     if (!result) {
         report_error(result.error());
         return;
@@ -722,7 +909,7 @@ void Shell::click_at(const std::string &arguments) {
     x = clamp_axis(x, frame_.width);
     y = clamp_axis(y, frame_.height);
     const auto barrier = frame_barrier();
-    auto result = session_.controller.click({x, y});
+    auto result = controller_.click({x, y});
     if (!result) {
         report_error(result.error());
         return;
@@ -757,7 +944,7 @@ void Shell::nudge(bool vertical, bool positive) {
 void Shell::inject_key(const std::string &combination, std::chrono::milliseconds hold) {
     const auto barrier = frame_barrier();
     sleep_for_key_delay();
-    auto result = session_.controller.key(combination, hold);
+    auto result = controller_.key(combination, hold);
     if (!result) {
         report_error(result.error());
         return;
@@ -809,7 +996,7 @@ bool Shell::try_click_hold(const std::string &token, std::istringstream &args) {
         y = frame_.height > 0 ? frame_.height / 2.0 : 0.0;
     }
     const auto barrier = frame_barrier();
-    auto result = session_.controller.press_drag({x, y}, {x + dx, y + dy}, *hold);
+    auto result = controller_.press_drag({x, y}, {x + dx, y + dy}, *hold);
     if (!result) {
         report_error(result.error());
         return true;
@@ -1042,7 +1229,7 @@ void Shell::cmd_drag(std::istringstream &input) {
         y = frame_.height > 0 ? frame_.height / 2.0 : 0.0;
     }
     const auto barrier = frame_barrier();
-    auto result = session_.controller.rel_drag({x, y}, {x + dx, y + dy});
+    auto result = controller_.rel_drag({x, y}, {x + dx, y + dy});
     if (!result) {
         report_error(result.error());
         return;
@@ -1098,7 +1285,7 @@ void Shell::cmd_center(std::istringstream &) {
     mouse_x_ = frame_.width / 2.0;
     mouse_y_ = frame_.height / 2.0;
     const auto barrier = frame_barrier();
-    auto result = session_.controller.move({mouse_x_, mouse_y_});
+    auto result = controller_.move({mouse_x_, mouse_y_});
     if (!result) {
         report_error(result.error());
         return;
@@ -1129,7 +1316,7 @@ void Shell::cmd_type(std::istringstream &input) {
     std::getline(input >> std::ws, text);
     const auto barrier = frame_barrier();
     sleep_for_key_delay();
-    auto result = session_.controller.type_text(text);
+    auto result = controller_.type_text(text);
     if (!result) {
         report_error(result.error());
         return;
@@ -1177,10 +1364,19 @@ int main(int argc, char **argv) {
         return 2;
     }
 
+    if (options.detach && ::setsid() < 0) {
+        fmt::println(stderr, "warning: setsid failed: {}", std::strerror(errno));
+    }
+
     auto session = launch_session(options);
     if (!session) return 1;
 
+    const bool serve = options.serve;
     Shell shell(std::move(*session), std::move(options));
-    shell.run();
+    if (serve) {
+        shell.serve();
+    } else {
+        shell.run();
+    }
     return 0;
 }

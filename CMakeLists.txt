@@ -18,7 +18,8 @@ include(GNUInstallDirs)
 include(CTest)
 include(ExternalProject)
 find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc CONFIG)
-find_package(Boost REQUIRED COMPONENTS filesystem system program_options CONFIG)
+find_package(Boost REQUIRED COMPONENTS filesystem system program_options json CONFIG)
+find_package(Threads REQUIRED)
 find_package(fmt REQUIRED)
 # ABIX is vendored so the runtime headers track the pinned submodule. 0.2.3's runtime-only mode builds just the
 # header-only ABIX::runtime target (plus MICS); it skips AMC, DLLs, tests and install rules, so no LLVM/Clang or
@@ -222,6 +223,9 @@ add_library(
     src/SKL/WCAS/Private/Harness/FrameBus.cpp
     src/SKL/WCAS/Private/Harness/ControlledApp.cpp)
 add_library(WCAS::WCAS ALIAS WCAS)
+add_library(wcas-ipc STATIC src/SKL/WCAS/Private/IPC/Protocol.cpp src/SKL/WCAS/Private/IPC/Server.cpp)
+target_include_directories(wcas-ipc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(wcas-ipc PUBLIC Boost::json Boost::system Threads::Threads)
 target_compile_definitions(WCAS PRIVATE WCAS_BUILDING_LIBRARY=1)
 target_include_directories(WCAS PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                                        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
@@ -265,7 +269,10 @@ unset(_wcas_build_testing)
 add_executable(wcas-example main.cpp)
 target_link_libraries(wcas-example PRIVATE WCAS::WCAS)
 add_executable(proton-inject proton-inject.cpp)
-target_link_libraries(proton-inject PRIVATE WCAS::WCAS Boost::program_options cmdly_static)
+target_link_libraries(proton-inject PRIVATE WCAS::WCAS wcas-ipc Boost::program_options cmdly_static)
+add_executable(wcasctl tools/wcasctl.cpp)
+target_link_libraries(wcasctl PRIVATE wcas-ipc)
+install(TARGETS wcasctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 if(BUILD_TESTING)
     # 辅助函数：注册一个测试可执行文件并加入 CTest。 用法：wcas_add_test(<名称> <源文件> [LIBS <额外链接库>...]) <名称>     → target 名 = wcas-<名称>，测试名同样
@@ -283,6 +290,8 @@ if(BUILD_TESTING)
 
     # ---- 常规单元/接口测试 ----
     wcas_add_test(unit-tests tests/unit.cpp)
+    wcas_add_test(ipc-protocol tests/ipc_protocol.cpp LIBS wcas-ipc)
+    wcas_add_test(ipc-server tests/ipc_server.cpp LIBS wcas-ipc)
     wcas_add_test(controller-interface tests/controller_interface.cpp)
     wcas_add_test(capture-interface tests/capture_interface.cpp)
     wcas_add_test(window-interface tests/window_interface.cpp)
