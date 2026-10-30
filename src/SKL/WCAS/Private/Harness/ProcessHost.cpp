@@ -9,6 +9,8 @@
 #endif
 
 #include <stdlib.h>
+#include <fstream>
+#include <string>
 #include <vector>
 
 #include "SKL/WCAS/Error.h"
@@ -19,6 +21,17 @@
 namespace skl::wcas {
 namespace {
 std::error_code code(errc value) { return make_error_code(value); }
+
+#ifdef __linux__
+bool process_is_zombie(pid_t pid) {
+    std::ifstream file("/proc/" + std::to_string(pid) + "/stat");
+    std::string line;
+    if (!std::getline(file, line)) return false;
+    const auto close_paren = line.rfind(')');
+    if (close_paren == std::string::npos || close_paren + 2 >= line.size()) return false;
+    return line[close_paren + 2] == 'Z';
+}
+#endif
 }   // namespace
 
 ProcessHost::~ProcessHost() { terminate(); }
@@ -96,7 +109,11 @@ result<void> ProcessHost::spawn(const ProcessSpec &spec) {
 
 bool ProcessHost::alive() const noexcept {
     if (exited_ || child_ <= 0) return false;
-    return ::kill(child_, 0) == 0;
+    if (::kill(child_, 0) != 0) return false;
+#ifdef __linux__
+    if (process_is_zombie(child_)) return false;
+#endif
+    return true;
 }
 
 bool ProcessHost::poll_exited() noexcept {

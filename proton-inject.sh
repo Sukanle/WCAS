@@ -35,6 +35,10 @@
 #   --env KEY=VALUE        额外环境变量（可重复）
 #   --game-arg ARG         传递给游戏的参数（可重复）
 #   --cli                  启用命令行交互模式
+#   --serve                以 IPC session host 常驻运行（默认；不读 stdin）
+#   --no-serve             禁用 IPC，保持旧的前台 CLI 行为
+#   --socket PATH          IPC Unix socket 路径（默认 $XDG_RUNTIME_DIR/wcas/<pid>.sock）
+#   --detach               脱离控制终端（setsid），适合桌面快捷方式
 #   --debug-all            启用全部调试类别
 #   --debug-capture        截图/采集调试日志
 #   --debug-dmabuf         DMA-BUF 导入/回读诊断
@@ -68,6 +72,7 @@
 #   GRAPHICS_API          图形 API 后端: dxvk (默认) | vulkan (原生) | opengl
 #   CAPTURE_BACKEND       截图后端: dmabuf (默认), client, kms, shm
 #   LOG_DIR               日志输出目录
+#   WCAS_TEST_BINARY      覆盖自动探测的 proton-inject 路径（开发/测试用）
 # ============================================================================
 
 set -euo pipefail
@@ -100,6 +105,9 @@ WINE_PREFIX=""
 EXTRA_ENV=()
 GAME_ARGS=()
 CLI_MODE=false
+SERVE_MODE=""  # "" = auto (serve unless --cli), "yes", "no"
+SOCKET_PATH=""
+DETACH=false
 DEBUG_MODE=0
 debug_args=(
     [0]="--debug-capture"    # 位0，值 0x01
@@ -172,6 +180,26 @@ while [[ $# -gt 0 ]]; do
             ;;
         --cli)
             CLI_MODE=true
+            shift
+            ;;
+        --serve)
+            SERVE_MODE="yes"
+            shift
+            ;;
+        --no-serve)
+            SERVE_MODE="no"
+            shift
+            ;;
+        --socket)
+            if [[ -z "${2:-}" ]]; then
+                log "[ERROR] --socket 需要路径"
+                exit 1
+            fi
+            SOCKET_PATH="$2"
+            shift 2
+            ;;
+        --detach)
+            DETACH=true
             shift
             ;;
         --debug-all)
@@ -348,7 +376,10 @@ if [[ "${UMU_MODE}" == "yes" ]]; then
     fi
 fi
 
-if [[ -f "${PROJECT_DIR}/build/Release/proton-inject" ]]; then
+if [[ -n "${WCAS_TEST_BINARY:-}" && -x "${WCAS_TEST_BINARY}" ]]; then
+    TEST_BINARY="${WCAS_TEST_BINARY}"
+    log "[OK] 使用 WCAS_TEST_BINARY: ${TEST_BINARY}"
+elif [[ -f "${PROJECT_DIR}/build/Release/proton-inject" ]]; then
     TEST_BINARY="${PROJECT_DIR}/build/Release/proton-inject"
     log "[OK] 找到 Release 测试二进制: ${TEST_BINARY}"
 elif [[ -f "${PROJECT_DIR}/build/Debug/proton-inject" ]]; then
@@ -650,9 +681,17 @@ build_test_command() {
     # 截图后端（适用于所有模式）
     cmd+=("--capture-backend" "${CAPTURE_BACKEND}")
 
-    # CLI 模式
+    # CLI / IPC 模式：默认非 CLI 时进入 serve，避免无 TTY 时 stdin EOF 停掉游戏。
     if ${CLI_MODE}; then
         cmd+=("--cli")
+    elif [[ "${SERVE_MODE}" != "no" ]]; then
+        cmd+=("--serve")
+        if [[ -n "${SOCKET_PATH}" ]]; then
+            cmd+=("--socket" "${SOCKET_PATH}")
+        fi
+        if ${DETACH}; then
+            cmd+=("--detach")
+        fi
     fi
 
     # Debug 模式
