@@ -212,19 +212,32 @@ Health、Target、FrameBus 各自绑定 ABIX provider；`SessionContext` 提供 
 - 协议：libwayland（client + server）、xkbcommon、xcb + xcb-composite
 - XWayland 输入（可选）：X11 + Xtst（XTest）；缺失时 X11 输入 provider 保留但返回
   `feature_not_implemented`
-- Interface：`third_party/ABIX`（v0.2.3 子模块，提供 `SKL/ABIX` 契约与 MICS；默认
-  runtime-only 构建，可用 `-DWCAS_USE_SYSTEM_ABIX=ON` 改为消费已安装的 ABIX CMake 包）
+- Interface：ABIX（v0.2.3，提供 `SKL/ABIX` 契约与 MICS；默认 runtime-only 构建）
+- 错误与条件域：EPCD（依赖 ABIX；通过 `find_package` 复用同一 ABIX target）
+- CLI 行编辑：cmdly
+- DRM/KMS 辅助：libdrmtap（MIT）
 - GPU：Vulkan、libdrm ≥ 2.4.95、liburing
 - GPU（可选）：EGL + GLESv2 + GBM —— DMA-BUF 的 EGL 后端。缺失时该后端编译为 stub，
   采集退回 Vulkan
 - 生成元数据所需：`wayland.xml`、`wayland-protocols/`、`wayland-server-protocol.h`
-- 子模块：`third_party/ABIX`、`third_party/cmdly`、`third_party/libdrmtap`（MIT）
 
-初始化子模块：
+EPCD、ABIX、cmdly、libdrmtap 均先通过 `find_package` 查找已安装的包；找不到时由 CMake
+用 `FetchContent` 通过 SSH 自动克隆到构建目录的 `_deps/`，源码树不再包含
+`third_party/` 或 git submodule。首次 configure 需要可用 SSH key/agent 与 GitHub 网络；
+之后可离线复用同一构建目录。
+
+依赖仓库和版本可通过 cache 变量覆盖，例如：
 
 ```sh
-git submodule update --init --recursive
+cmake -B build/Debug -S . \
+  -DWCAS_EPCD_REPOSITORY=git@github.com:Sukanle/EPCD.git \
+  -DWCAS_ABIX_REPOSITORY=git@github.com:Sukanle/ABIX.git \
+  -DWCAS_CMDLY_REPOSITORY=git@github.com:Sukanle/cmdly.git \
+  -DWCAS_LIBDRMTAP_REPOSITORY=git@github.com:fxd0h/libdrmtap.git
 ```
+
+> `Sukanle/libdrmtap` 尚未创建；默认使用上游 `fxd0h/libdrmtap`。若 fork 已创建，把
+> `WCAS_LIBDRMTAP_REPOSITORY` 指向新地址即可。对应版本用 `WCAS_*_TAG` 覆盖。
 
 ### 构建
 
@@ -243,8 +256,8 @@ ctest --test-dir build/Debug --output-on-failure
 
 > 始终使用**独立构建目录**。历史上曾因混用旧的构建产物误判“协议元数据损坏”。
 >
-> 默认从 `third_party/ABIX` 以 runtime-only 方式构建 ABIX，无需预装 LLVM/AMC 或 ABIX 包；
-> 若要使用已安装的 ABIX 0.2.3，追加 `-DWCAS_USE_SYSTEM_ABIX=ON -DCMAKE_PREFIX_PATH=<prefix>`。
+> 默认以 runtime-only 方式构建自动获取的 ABIX，无需预装 LLVM/AMC 或 ABIX 包；若系统已有
+> ABIX 0.2.3 / EPCD 0.1 的 CMake 包，配置 `CMAKE_PREFIX_PATH` 后会自动优先使用已安装版本。
 
 ## 七、如何使用
 
@@ -523,10 +536,9 @@ src/SKL/WCAS/
                            X11 XTest 输入
   Private/XWayland.cpp     XWayland bridge
   Private/X11Capture.cpp   X11/XComposite 抓取与窗口枚举
-third_party/
-  ABIX/                    ABIX Interface 契约 + MICS（v0.2.3，runtime-only 子模块）
-  cmdly/                   命令行行编辑（CLI 使用）
-  libdrmtap/               DRM/KMS 辅助（MIT，独立子模块）
+cmake/
+  Dependencies.cmake       find_package / FetchContent 依赖引导（EPCD、ABIX、cmdly、libdrmtap）
+  Findlibdrmtap.cmake      已安装 libdrmtap 的查找模块
 codegen/                   由协议 XML 生成 wire 元数据（构建期执行）
 scripts/                   维护脚本（Markdown reflow 等）
 tests/                     单元测试与协议集成测试（fake Wayland 环境）
@@ -540,5 +552,5 @@ proton-inject*.sh          Proton / Lutris 启动包装
 ## 十一、许可
 
 本项目采用 [Apache License 2.0](LICENSE) 开源，Copyright 2026 Sukanle。
-第三方组件归属见 [NOTICE](NOTICE)。`third_party/libdrmtap` 为独立子模块（MIT），
-构建时以 `SHARED` 方式链接，不并入本仓库源码。
+第三方组件归属见 [NOTICE](NOTICE)。libdrmtap（MIT）由 CMake 在构建期获取，
+以 `SHARED` 方式链接，不并入本仓库源码；依赖源码位于构建目录的 `_deps/`。

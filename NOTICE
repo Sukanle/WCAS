@@ -13,11 +13,12 @@ This product depends on, but does not include, the following third-party
 software. Each remains under its own license; see the corresponding project
 for the full terms.
 
-  third_party/libdrmtap (git submodule)
+  libdrmtap
     https://github.com/fxd0h/libdrmtap
     MIT License
     Copyright (c) 2026 libdrmtap contributors
-    Linked as a shared library at build time; source is not vendored here.
+    Fetched by CMake at configure time and linked as a shared library; source is
+    not vendored here.
 
 --------------------------------------------------------------------------------
 
