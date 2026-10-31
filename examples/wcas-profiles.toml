@@ -57,7 +57,7 @@ dependencies = ["hypergryph-launcher"]
 # An explicit override is also allowed:
 # parent = '~/Games/.../1.6.0/Games.exe'
 #
-# Path to the helper built from tools/endfield-parent-spoof.c.
+# Path to the helper built from tools/endfield-parent-spoof.cpp.
 # Relative paths are resolved next to this config file or the WCAS binary.
 helper = '../build/endfield-parent-spoof.exe'
 

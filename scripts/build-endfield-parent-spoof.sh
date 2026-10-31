@@ -12,6 +12,6 @@ if ! command -v zig >/dev/null 2>&1; then
 fi
 
 mkdir -p "$(dirname "${output}")"
-zig cc -target x86_64-windows-gnu -O2 -municode -Wl,--subsystem,windows \
-    -o "${output}" "${root}/tools/endfield-parent-spoof.c" -lshell32
+zig c++ -target x86_64-windows-gnu -O2 -municode -Wl,--subsystem,windows \
+    -o "${output}" "${root}/tools/endfield-parent-spoof.cpp" -lshell32
 echo "built ${output}"
