@@ -26,6 +26,15 @@ enum class GraphicsApi : uint8_t {
     /// WineD3D (OpenGL), selected via PROTON_USE_WINED3D.
     opengl,
 };
+
+/// Preferred launch transport. `Auto` keeps the native Wayland proxy first and
+/// falls back to XWayland; `XWayland` is useful for Wine/QtWebEngine launchers
+/// that render a white, unresponsive window through the Wine Wayland driver.
+enum class LaunchTransport : uint8_t {
+    Auto = 0,
+    NativeWayland = 1,
+    XWayland = 2,
+};
 /// Pointer position reported by the compositor for the app's focused surface
 /// (surface-local, logical pixels). This reflects the real input device, not
 /// the coordinates wcas injected.
@@ -162,6 +171,7 @@ public:
     LaunchConfig &inherit_diagnostics(bool value = true) noexcept;
     LaunchConfig &gpu_accelerated(bool value = true) noexcept;
     LaunchConfig &graphics_api(GraphicsApi value) noexcept;
+    LaunchConfig &transport(LaunchTransport value) noexcept;
     /// Extra process matcher (ECMAScript regex) for windows that are not direct
     /// descendants of the launched program. Defaults to the program's parent
     /// directory. Matched against the process command line + executable path.
@@ -178,6 +188,7 @@ private:
     bool inherit_diagnostics_ = false;
     bool gpu_accelerated_ = false;
     GraphicsApi graphics_api_ = GraphicsApi::vulkan;
+    LaunchTransport transport_ = LaunchTransport::Auto;
 };
 class SKL_WCAS_API ComputerUseBuilder {
 public:

@@ -302,6 +302,7 @@ build/Release/proton-inject \
 | `--arg, -s` / `--env, -e`       | 传给程序的参数 / 环境变量（可重复）                                  |
 | `--proton` / `--wine` / `--umu` | 启动方式                                                             |
 | `--graphics-api, -g`            | `dxvk`(默认) 或 `vulkan`(`vk`，游戏原生) 或 `opengl`(`gl`/`wined3d`) |
+| `--transport`                   | `auto`(默认) / `wayland`(native) / `xwayland`(x11)                  |
 | `--capture-backend, -b`         | `client`(默认) / `shm` / `dmabuf` / `kms`                            |
 | `--bridge-width/-height, -x/-y` | XWayland 回退桥接分辨率                                              |
 | `--match-regex, -r`             | 额外的子窗口进程匹配正则（默认取目标程序父目录）                     |
