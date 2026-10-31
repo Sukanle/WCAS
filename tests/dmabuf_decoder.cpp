@@ -2,6 +2,7 @@
 // hardware/environment dependent; this test pins the provider/binding shape and
 // the decode result contract.
 #include "SKL/WCAS/Private/Proxy/DMABUF/Decoder.h"
+#include "SKL/WCAS/Error.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -25,7 +26,7 @@ public:
     bool available() const { return true; }
     bool supports(uint32_t fourcc, uint64_t modifier) const { return fourcc == 0x34325241U && modifier == 0; }
     result<DmaBufDecoded> decode(const DmaBufDescriptor *descriptor) const {
-        if (descriptor == nullptr || descriptor->fd < 0) return std::make_error_code(std::errc::invalid_argument);
+        if (descriptor == nullptr || descriptor->fd < 0) return skl::wcas::from_std_errc(std::errc::invalid_argument);
         return DmaBufDecoded{
             cv::Mat(descriptor->height, descriptor->width, CV_8UC3, cv::Scalar(1, 2, 3)), kind(), true};
     }

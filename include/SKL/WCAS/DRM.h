@@ -10,9 +10,6 @@
 
 namespace skl::wcas {
 
-template<typename T>
-using result = boost::outcome_v2::std_result<T>;
-
 auto from_swaymsg(pid_t pid) -> optional<cv::Rect>;
 auto from_swaytree(pid_t pid) -> optional<cv::Rect>;
 auto from_hyprctl(pid_t pid) -> optional<cv::Rect>;

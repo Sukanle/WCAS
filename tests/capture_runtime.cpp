@@ -16,7 +16,7 @@ int main() {
     CaptureRuntime capture(&context);
     auto result = capture.capture();
     assert(!result.has_value());
-    assert(result.error() == skl::make_error_code(errc::frame_capture_failed));
+    assert(result.error() == skl::wcas::make_error_code(errc::frame_capture_failed));
     assert(!capture.frame_size().has_value());
     std::puts("capture runtime: ok");
     return 0;

@@ -16,7 +16,7 @@ using skl::abix::poly::InterfaceMethod;
 using skl::abix::poly::InterfaceRegistry;
 using skl::abix::poly::InterfaceStatus;
 
-std::error_code code(errc value) { return ::skl::make_error_code(value); }
+skl::epcd::ErrorCode code(errc value) { return make_error_code(value); }
 
 // Focus policy provider. Activation itself is forwarded by the Wayland proxy;
 // this provider decides which session may request it.

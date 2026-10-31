@@ -213,7 +213,8 @@ Health、Target、FrameBus 各自绑定 ABIX provider；`SessionContext` 提供 
 - XWayland 输入（可选）：X11 + Xtst（XTest）；缺失时 X11 输入 provider 保留但返回
   `feature_not_implemented`
 - Interface：ABIX（v0.2.3，提供 `SKL/ABIX` 契约与 MICS；默认 runtime-only 构建）
-- 错误与条件域：EPCD（依赖 ABIX；通过 `find_package` 复用同一 ABIX target）
+- 错误与条件域：EPCD（依赖 ABIX；通过 `find_package` 复用同一 ABIX target）；WCAS 的
+  `result<T>` 错误类型为 `skl::epcd::ErrorCode`
 - CLI 行编辑：cmdly
 - DRM/KMS 辅助：libdrmtap（MIT）
 - GPU：Vulkan、libdrm ≥ 2.4.95、liburing
@@ -523,13 +524,11 @@ WCAS **不**为受控应用提供沙箱：被控应用仍拥有调用方用户�
 
 ```
 include/SKL/               skl 公共头
-  Config.h                 skl 全局配置
-  ErrorCode.h              skl 错误码基类与兼容宏（WCAS 用 EPCD 静态域替代旧表）
   WCAS/                    WCAS 公共契约（WCAS / Controller / Capture / Frame / Window /
                            Transport / Types / Error / DRM / DMABUF）
   WCAS/Private/            内部头（Debug、Harness、Proxy、DMABUF、X11Capture、XWayland）
 src/SKL/WCAS/
-  Error.cpp                WCAS EPCD 静态错误域、CategoryRegistry 注册与 std::error_code 适配
+  Error.cpp                WCAS EPCD 静态错误域、CategoryRegistry 注册与错误描述
   DRM.cpp                  DRM/KMS 与窗口几何
   DMABUF.cpp               DMA-BUF 能力探测
   Private/Proxy/           Wayland 代理：Reactor、wire 翻译、Interfaces、surface 观察、

@@ -1,6 +1,7 @@
 // Contract test for WindowEnumerator / WindowResolver. A plain fake provider
 // proves both interfaces can be registered and bound independently.
 #include "SKL/WCAS/Window.h"
+#include "SKL/WCAS/Error.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -36,13 +37,13 @@ public:
     }
 
     result<cv::Rect> find_by_pid(int32_t pid) const {
-        if (pid != 42) return std::make_error_code(std::errc::invalid_argument);
+        if (pid != 42) return skl::wcas::from_std_errc(std::errc::invalid_argument);
         return cv::Rect{10, 20, 1'280, 720};
     }
 
     result<cv::Rect> find_by_size_and_title(int32_t width, int32_t height, std::string title) const {
         if (width != 1'280 || height != 720 || title != "Demo Window")
-            return std::make_error_code(std::errc::invalid_argument);
+            return skl::wcas::from_std_errc(std::errc::invalid_argument);
         return cv::Rect{10, 20, 1'280, 720};
     }
 };

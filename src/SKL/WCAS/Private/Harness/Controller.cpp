@@ -28,7 +28,7 @@ using skl::abix::poly::InterfaceMethod;
 using skl::abix::poly::InterfaceRegistry;
 using skl::abix::poly::InterfaceStatus;
 
-std::error_code code(errc value) { return ::skl::make_error_code(value); }
+skl::epcd::ErrorCode code(errc value) { return make_error_code(value); }
 
 uint32_t input_target(const std::shared_ptr<proxy::ConnState> &session) {
     return session ? proxy::target_surface(session) : 0;

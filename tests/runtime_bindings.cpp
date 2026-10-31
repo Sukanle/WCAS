@@ -20,7 +20,7 @@ int main() {
     CaptureRuntime capture(&context);
     auto frame = capture.capture();
     assert(!frame.has_value());
-    assert(frame.error() == skl::make_error_code(errc::frame_capture_failed));
+    assert(frame.error() == skl::wcas::make_error_code(errc::frame_capture_failed));
 
     WindowRuntime windows(&context);
     auto list = windows.list();
@@ -40,7 +40,7 @@ int main() {
     TargetRuntime target(&context);
     auto selected = target.select(0);
     assert(!selected.has_value());
-    assert(selected.error() == skl::make_error_code(errc::unspecified));
+    assert(selected.error() == skl::wcas::make_error_code(errc::unspecified));
     assert(target.selected_target() == TargetId{});
 
     std::puts("runtime bindings: ok");

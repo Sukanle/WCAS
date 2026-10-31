@@ -1,9 +1,7 @@
 #pragma once
 
-#include "SKL/ErrorCode.h"
 #include "SKL/EPCD/Core/StaticDomain.h"
 
-#include <stdint.h>
 #include <string>
 #include <system_error>
 
@@ -45,28 +43,22 @@ namespace skl::wcas {
     X(unspecified, 0x00FF, "Any other failure that does not fit a dedicated variant.",                      \
         ::skl::epcd::GenericCondition::unknown)
 
-EPCD_DEFINE_STATIC_DOMAIN(WCASEC, ::skl::epcd::make_skl_domain(0x001, 0x0001), "WCAS", SKL_WCAS_ERROR_LIST);
+EPCD_DEFINE_STATIC_DOMAIN(WcasError, ::skl::epcd::make_skl_domain(0x001, 0x0001), "WCAS", SKL_WCAS_ERROR_LIST);
 
 // Compatibility spelling for existing WCAS call sites. The canonical enum is
 // EPCD's generated WcasError.
-using errc = WCASEC;
+using errc = WcasError;
 
-// std::error_code adapter. EPCD remains the source of truth for the static
-// domain; this category only bridges legacy std::error_code consumers to it.
-class error_category final : public ::skl::error_category {
-public:
-    ~error_category() override = default;
+/// Converts an OS/generic error to EPCD's built-in std-compatibility domain.
+/// This keeps public WCAS results free of std::error_code while preserving the
+/// original OS error value.
+[[nodiscard]] constexpr skl::epcd::ErrorCode from_std_errc(std::errc value) noexcept {
+    return skl::epcd::make_error_code(skl::epcd::domain::std_compat, static_cast<skl::epcd::ErrorValue>(value));
+}
 
-    [[nodiscard]] static const error_category &instance() noexcept;
-
-    [[nodiscard]] const char *name() const noexcept override;
-    [[nodiscard]] std::string message(int ev) const override;
-    [[nodiscard]] const char *module() const noexcept override;
-    [[nodiscard]] std::error_condition default_error_condition(int ev) const noexcept override;
-
-private:
-    error_category() = default;
-};
+/// Human-readable fallback text for an EPCD code. WCAS-domain codes use the
+/// static table; std-compat codes use the platform's generic message.
+[[nodiscard]] std::string error_message(const skl::epcd::ErrorCode &code);
 
 /// Registers the WCAS static domain with EPCD's CategoryRegistry.
 /// Idempotent; also runs automatically when the library is loaded.
@@ -76,7 +68,3 @@ private:
 [[nodiscard]] bool errors_registered() noexcept;
 
 }   // namespace skl::wcas
-
-namespace skl {
-[[nodiscard]] std::error_code make_error_code(wcas::errc ec) noexcept;
-}   // namespace skl
