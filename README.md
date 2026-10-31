@@ -296,7 +296,7 @@ QtWebEngine 启动器（例如鹰角启动器）在 Wine Wayland 下可能白屏
 `examples/wcas-profiles.toml` 定义了启动器、Arknights、Endfield 的 profile。示例：
 
 ```sh
-./build/Release/proton-inject \
+./proton-inject.sh \
   --config examples/wcas-profiles.toml \
   --profile endfield --serve
 ```

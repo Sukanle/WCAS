@@ -54,6 +54,8 @@
 #   --bridge-height H      XWayland 桥高度（默认 800）
 #   --no-gpu               禁用 GPU 加速
 #   --graphics-api API     图形 API 后端: dxvk (默认) | vulkan (原生) | opengl
+#   --config FILE          TOML launch profile 文件
+#   --profile ID           选择 --config 中的 profile
 #   --transport MODE       启动通道: auto (默认) | wayland (native) | xwayland (x11)
 #   --capture-backend BE   截图后端: dmabuf (默认), client, kms, shm
 #   --output-dir DIR       日志输出目录（默认 /tmp/agent-seat-logs）
@@ -98,6 +100,8 @@ log "日志文件: ${LOG_FILE}"
 
 # --------------- 参数解析 ---------------
 PROGRAM=""
+CONFIG_FILE=""
+PROFILE_ID=""
 UMU_MODE=""  # "" = auto, "yes", "no"
 PROTON_PATH=""
 PROTON_VARIANT="${PROTON_VARIANT:-dw}"
@@ -135,6 +139,14 @@ INHERIT_OUTPUT=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --config)
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        --profile)
+            PROFILE_ID="$2"
+            shift 2
+            ;;
         --umu)
             UMU_MODE="yes"
             shift
@@ -346,7 +358,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "${PROGRAM}" ]]; then
+if [[ -z "${PROGRAM}" && -z "${CONFIG_FILE}" ]]; then
     log "[ERROR] 未指定程序路径"
     log ""
     log "用法: $0 <程序路径> [选项]"
@@ -357,9 +369,17 @@ if [[ -z "${PROGRAM}" ]]; then
     exit 1
 fi
 
-log "目标程序: ${PROGRAM}"
+if [[ -n "${CONFIG_FILE}" ]]; then
+    log "配置文件: ${CONFIG_FILE}"
+    log "Profile: ${PROFILE_ID:-<default>}"
+else
+    log "目标程序: ${PROGRAM}"
+fi
 
 # --------------- 自动检测 umu 模式 ---------------
+if [[ -n "${CONFIG_FILE}" ]]; then
+    UMU_MODE="no"
+fi
 if [[ -z "${UMU_MODE}" ]]; then
     if [[ "${PROGRAM}" == *.exe ]]; then
         UMU_MODE="yes"
@@ -661,7 +681,12 @@ build_test_command() {
         "${TEST_BINARY}"
     )
 
-    if [[ "${UMU_MODE}" == "yes" ]]; then
+    if [[ -n "${CONFIG_FILE}" ]]; then
+        cmd+=("--config" "${CONFIG_FILE}")
+        if [[ -n "${PROFILE_ID}" ]]; then
+            cmd+=("--profile" "${PROFILE_ID}")
+        fi
+    elif [[ "${UMU_MODE}" == "yes" ]]; then
         # umu 模式：program 传游戏 .exe 路径，--umu 让 Rust 端用 umu-run 包装
         cmd+=("--program" "${PROGRAM}")
         cmd+=("--umu")
