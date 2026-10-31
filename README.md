@@ -396,6 +396,7 @@ wcasctl list                               # 列出活动 socket
 wcasctl status                             # pid/frame/windows/transport
 wcasctl windows                            # 窗口列表
 wcasctl capture --out shot.png             # PNG 截图
+wcasctl capture-sdm --out frame.bgr        # 共享内存 raw BGR（无 PNG/base64）
 wcasctl click 640 360                      # frame 坐标
 wcasctl move 640 360
 wcasctl key ctrl+a
@@ -404,8 +405,13 @@ wcasctl stop                               # 结束受控游戏
 ```
 
 socket 默认位于 `$XDG_RUNTIME_DIR/wcas/<pid>.sock`，`latest` 指向最近会话；连接使用
-`SO_PEERCRED` 校验同 UID，目录 0700、socket 0600。协议为长度前缀 JSON；截图当前以
-PNG + base64 返回，后续再加 memfd/共享内存。
+`SO_PEERCRED` 校验同 UID，目录 0700、socket 0600。协议为长度前缀 JSON。
+
+截图有两种数据面：
+
+- `capture`：PNG + base64，适合低频 OCR；
+- `capture-sdm`：返回共享内存 channel，客户端直接读取 raw BGR/BGRA，避免 PNG/base64
+  和 UDS 像素传输；帧带 `width/height/stride/format`，由客户端按 stride 解析。
 
 键盘注入需要目标窗口获得键盘焦点；若窗口不接收键盘，可在启动时加
 `--allow-activation`，或先用 `move/click` 激活目标窗口。

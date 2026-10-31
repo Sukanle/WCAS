@@ -2,6 +2,7 @@
 #include "SKL/WCAS/DMABUF.h"
 #include "SKL/WCAS/Private/IPC/Protocol.h"
 #include "SKL/WCAS/Private/IPC/Server.h"
+#include "SKL/WCAS/Private/SDM/Channel.h"
 
 #include <opencv2/imgcodecs.hpp>
 #include <boost/json.hpp>
@@ -11,6 +12,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <csignal>
 #include <cstring>
 #include <ctype.h>
 #include <chrono>
@@ -18,6 +20,7 @@
 #include <stdlib.h>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -32,6 +35,10 @@
 namespace {
 
 using namespace skl::wcas;
+
+volatile std::sig_atomic_t g_ipc_stop = 0;
+
+void handle_ipc_stop(int) { g_ipc_stop = 1; }
 
 /// Debug log categories, mirroring the Rust `Debug` bitflags.
 struct DebugFlags {
@@ -440,6 +447,7 @@ private:
     void create_terminal();
     void print_startup() const;
     boost::json::object handle_ipc(const boost::json::object &request);
+    bool ensure_sdm_channel(std::size_t bytes, std::string &error);
 
     // cursor and frame bookkeeping
     void refresh_frame_size();
@@ -489,6 +497,7 @@ private:
     Session session_;
     Options options_;
     Controller controller_;
+    std::unique_ptr<sdm::Channel> sdm_channel_;
     std::string ipc_path_;
     cv::Size frame_;
     unsigned screenshot_ = 0;
@@ -600,7 +609,10 @@ void Shell::serve() {
     }
     ipc_path_ = server.path();
     fmt::println("IPC listening on {}", ipc_path_);
-    while (session_.app.is_alive())
+    g_ipc_stop = 0;
+    std::signal(SIGINT, handle_ipc_stop);
+    std::signal(SIGTERM, handle_ipc_stop);
+    while (session_.app.is_alive() && g_ipc_stop == 0)
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     server.stop();
     if (session_.app.is_alive()) session_.app.stop();
@@ -636,7 +648,7 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         result["transport"] = session_.app.transport() == Transport::xwayland ? "xwayland" : "native_wayland";
         result["socket"] = ipc_path_;
         array capabilities;
-        for (const char *capability : {"capture", "input", "pointer", "keyboard", "windows", "stop"}) {
+        for (const char *capability : {"capture", "input", "pointer", "keyboard", "windows", "stop", "sdm"}) {
             capabilities.emplace_back(capability);
         }
         result["capabilities"] = std::move(capabilities);
@@ -684,6 +696,43 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         result["height"] = frame_.height;
         result["data"] =
             ipc::base64_encode(std::string_view(reinterpret_cast<const char *>(encoded.data()), encoded.size()));
+        return ok(std::move(result));
+    }
+
+    if (method == "capture_sdm") {
+        auto captured = session_.app.capture();
+        if (!captured) return fail(-32'001, captured.error().message());
+        const cv::Mat &image = captured.value();
+        if (image.depth() != CV_8U || (image.channels() != 3 && image.channels() != 4)) {
+            return fail(-32'004, "unsupported capture format for SDM");
+        }
+        const std::size_t bytes = image.step[0] * image.rows;
+        if (bytes > std::numeric_limits<std::uint32_t>::max()) {
+            return fail(-32'005, "frame too large for SDM channel");
+        }
+        std::string error;
+        if (!ensure_sdm_channel(bytes, error)) return fail(-32'005, std::move(error));
+
+        sdm::FrameInfo info;
+        info.width = static_cast<std::uint32_t>(image.cols);
+        info.height = static_cast<std::uint32_t>(image.rows);
+        info.stride = static_cast<std::uint32_t>(image.step[0]);
+        info.format = image.channels() == 3 ? sdm::PixelFormat::Bgr8 : sdm::PixelFormat::Bgra8;
+        info.timestamp_ns = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+                .count());
+        if (!sdm_channel_->write(image.data, bytes, info, error)) return fail(-32'006, std::move(error));
+
+        frame_ = cv::Size(image.cols, image.rows);
+        object result;
+        result["channel"] = sdm_channel_->name();
+        result["seq"] = sdm_channel_->latest_seq();
+        result["width"] = image.cols;
+        result["height"] = image.rows;
+        result["stride"] = info.stride;
+        result["format"] = image.channels() == 3 ? "bgr8" : "bgra8";
+        result["slot_count"] = sdm_channel_->slot_count();
+        result["slot_bytes"] = sdm_channel_->slot_bytes();
         return ok(std::move(result));
     }
 
@@ -761,6 +810,22 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
     if (method == "ping") return ok();
 
     return fail(-32'601, "method not found: " + method);
+}
+
+bool Shell::ensure_sdm_channel(std::size_t bytes, std::string &error) {
+    if (sdm_channel_ && sdm_channel_->slot_bytes() >= bytes) return true;
+    sdm_channel_.reset();
+    if (bytes == 0 || bytes > std::numeric_limits<std::uint32_t>::max()) {
+        error = "invalid SDM slot size";
+        return false;
+    }
+    sdm::Config config;
+    config.slot_count = 4;
+    config.slot_bytes = static_cast<std::uint32_t>(bytes);
+    auto channel = sdm::Channel::create(sdm::Channel::unique_name("wcas-sdm"), config, error);
+    if (!channel) return false;
+    sdm_channel_ = std::move(channel);
+    return true;
 }
 
 bool Shell::dispatch(const std::string &command, std::istringstream &input) {
