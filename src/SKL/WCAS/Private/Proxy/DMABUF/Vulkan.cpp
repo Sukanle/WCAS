@@ -753,7 +753,7 @@ using skl::abix::poly::InterfaceMethod;
 using skl::abix::poly::InterfaceRegistry;
 using skl::abix::poly::InterfaceStatus;
 
-std::error_code decoder_error(errc value) { return make_error_code(value); }
+std::error_code decoder_error(errc value) { return ::skl::make_error_code(value); }
 
 std::string describe_dmabuf(const DmaBufDescriptor &descriptor) {
     return fmt::format("{}x{} fourcc=0x{:08x} modifier=0x{:016x} stride={} offset={}", descriptor.width,

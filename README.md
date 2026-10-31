@@ -524,12 +524,12 @@ WCAS **不**为受控应用提供沙箱：被控应用仍拥有调用方用户�
 ```
 include/SKL/               skl 公共头
   Config.h                 skl 全局配置
-  ErrorCode.h              skl 错误码
+  ErrorCode.h              skl 错误码基类与兼容宏（WCAS 用 EPCD 静态域替代旧表）
   WCAS/                    WCAS 公共契约（WCAS / Controller / Capture / Frame / Window /
                            Transport / Types / Error / DRM / DMABUF）
   WCAS/Private/            内部头（Debug、Harness、Proxy、DMABUF、X11Capture、XWayland）
 src/SKL/WCAS/
-  Error.cpp                错误码实现
+  Error.cpp                WCAS EPCD 静态错误域、CategoryRegistry 注册与 std::error_code 适配
   DRM.cpp                  DRM/KMS 与窗口几何
   DMABUF.cpp               DMA-BUF 能力探测
   Private/Proxy/           Wayland 代理：Reactor、wire 翻译、Interfaces、surface 观察、
