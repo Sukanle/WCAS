@@ -169,7 +169,7 @@ if(NOT TARGET libdrmtap::drmtap)
         SOURCE_DIR "${DRMTAP_SOURCE_DIR}"
         BINARY_DIR "${DRMTAP_BUILD_DIR}"
         # Wipe the Meson build tree before setup. Upgrades can move libdrmtap
-        # from third_party/ to _deps/, and Meson rejects the stale coredata
+        # from third_party/ to dependencies/, and Meson rejects the stale coredata
         # (it still points at the old source and may not know newer options).
         CONFIGURE_COMMAND
             "${MESON_EXECUTABLE}" setup --wipe "<BINARY_DIR>" "<SOURCE_DIR>" --backend=ninja

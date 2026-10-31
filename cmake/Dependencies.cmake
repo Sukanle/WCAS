@@ -2,8 +2,16 @@
 #
 # Every dependency is first looked up with find_package(). When no package is
 # installed, FetchContent clones the repository over SSH (or the repository
-# override provided on the command line) and adds the source to this build.
-# No dependency is expected to live under third_party/.
+# override provided on the command line) into dependencies/ and adds the source
+# to this build. No dependency is expected to live under third_party/.
+#
+# dependencies/ is generated, git-ignored content (only its README is tracked)
+# so clones and FetchContent build trees never enter the WCAS history.
+
+set(WCAS_DEPENDENCIES_DIR "${PROJECT_SOURCE_DIR}/dependencies" CACHE PATH
+    "Directory for CMake-fetched dependency checkouts and build trees")
+set(FETCHCONTENT_BASE_DIR "${WCAS_DEPENDENCIES_DIR}" CACHE PATH
+    "Base directory for FetchContent dependency checkouts" FORCE)
 
 include(FetchContent)
 
