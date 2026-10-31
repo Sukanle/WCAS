@@ -11,6 +11,7 @@
 #include <fmt/std.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstring>
@@ -22,6 +23,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -428,6 +430,7 @@ bool is_quit_command(const std::string &command) { return command == "quit" || c
 class Shell {
 public:
     Shell(Session session, Options options);
+    ~Shell();
 
     void run();
     void serve();
@@ -448,6 +451,9 @@ private:
     void print_startup() const;
     boost::json::object handle_ipc(const boost::json::object &request);
     bool ensure_sdm_channel(std::size_t bytes, std::string &error);
+    bool write_sdm_frame(const cv::Mat &image, std::string &error);
+    boost::json::object sdm_metadata();
+    void stop_sdm_pump();
 
     // cursor and frame bookkeeping
     void refresh_frame_size();
@@ -498,6 +504,13 @@ private:
     Options options_;
     Controller controller_;
     std::unique_ptr<sdm::Channel> sdm_channel_;
+    sdm::FrameInfo sdm_info_{};
+    std::mutex sdm_mutex_;
+    std::thread sdm_pump_thread_;
+    std::atomic<bool> sdm_pump_stop_{false};
+    std::atomic<std::uint64_t> sdm_pump_attempts_{0};
+    std::atomic<std::uint64_t> sdm_pump_writes_{0};
+    std::atomic<std::uint64_t> sdm_pump_errors_{0};
     std::string ipc_path_;
     cv::Size frame_;
     unsigned screenshot_ = 0;
@@ -562,6 +575,63 @@ Shell::Shell(Session session, Options options)
     }
 }
 
+Shell::~Shell() { stop_sdm_pump(); }
+
+void Shell::stop_sdm_pump() {
+    sdm_pump_stop_.store(true, std::memory_order_release);
+    if (sdm_pump_thread_.joinable()) sdm_pump_thread_.join();
+    sdm_pump_stop_.store(false, std::memory_order_release);
+}
+
+bool Shell::write_sdm_frame(const cv::Mat &image, std::string &error) {
+    error.clear();
+    if (image.empty() || image.depth() != CV_8U || (image.channels() != 3 && image.channels() != 4)) {
+        error = "unsupported capture format for SDM";
+        return false;
+    }
+    const std::size_t bytes = image.step[0] * image.rows;
+    if (bytes > std::numeric_limits<std::uint32_t>::max()) {
+        error = "frame too large for SDM channel";
+        return false;
+    }
+
+    std::lock_guard lock(sdm_mutex_);
+    if (!ensure_sdm_channel(bytes, error)) return false;
+
+    sdm::FrameInfo info;
+    info.width = static_cast<std::uint32_t>(image.cols);
+    info.height = static_cast<std::uint32_t>(image.rows);
+    info.stride = static_cast<std::uint32_t>(image.step[0]);
+    info.format = image.channels() == 3 ? sdm::PixelFormat::Bgr8 : sdm::PixelFormat::Bgra8;
+    info.timestamp_ns = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+    if (!sdm_channel_->write(image.data, bytes, info, error)) return false;
+    sdm_info_ = info;
+    return true;
+}
+
+boost::json::object Shell::sdm_metadata() {
+    std::lock_guard lock(sdm_mutex_);
+    boost::json::object result;
+    result["running"] = sdm_pump_thread_.joinable() && !sdm_pump_stop_.load(std::memory_order_acquire);
+    result["attempts"] = sdm_pump_attempts_.load(std::memory_order_acquire);
+    result["writes"] = sdm_pump_writes_.load(std::memory_order_acquire);
+    result["errors"] = sdm_pump_errors_.load(std::memory_order_acquire);
+    if (!sdm_channel_) return result;
+    result["channel"] = sdm_channel_->name();
+    result["seq"] = sdm_channel_->latest_seq();
+    result["slot_count"] = sdm_channel_->slot_count();
+    result["slot_bytes"] = sdm_channel_->slot_bytes();
+    if (sdm_info_.width > 0 && sdm_info_.height > 0) {
+        result["width"] = sdm_info_.width;
+        result["height"] = sdm_info_.height;
+        result["stride"] = sdm_info_.stride;
+        result["format"] = sdm_info_.format == sdm::PixelFormat::Bgr8 ? "bgr8" : "bgra8";
+    }
+    return result;
+}
+
 void Shell::run() {
     print_startup();
     create_terminal();
@@ -614,6 +684,7 @@ void Shell::serve() {
     std::signal(SIGTERM, handle_ipc_stop);
     while (session_.app.is_alive() && g_ipc_stop == 0)
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    stop_sdm_pump();
     server.stop();
     if (session_.app.is_alive()) session_.app.stop();
 }
@@ -648,7 +719,7 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         result["transport"] = session_.app.transport() == Transport::xwayland ? "xwayland" : "native_wayland";
         result["socket"] = ipc_path_;
         array capabilities;
-        for (const char *capability : {"capture", "input", "pointer", "keyboard", "windows", "stop", "sdm"}) {
+        for (const char *capability : {"capture", "input", "pointer", "keyboard", "windows", "stop", "sdm", "frames"}) {
             capabilities.emplace_back(capability);
         }
         result["capabilities"] = std::move(capabilities);
@@ -702,39 +773,60 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
     if (method == "capture_sdm") {
         auto captured = session_.app.capture();
         if (!captured) return fail(-32'001, captured.error().message());
-        const cv::Mat &image = captured.value();
-        if (image.depth() != CV_8U || (image.channels() != 3 && image.channels() != 4)) {
-            return fail(-32'004, "unsupported capture format for SDM");
-        }
-        const std::size_t bytes = image.step[0] * image.rows;
-        if (bytes > std::numeric_limits<std::uint32_t>::max()) {
-            return fail(-32'005, "frame too large for SDM channel");
-        }
         std::string error;
-        if (!ensure_sdm_channel(bytes, error)) return fail(-32'005, std::move(error));
-
-        sdm::FrameInfo info;
-        info.width = static_cast<std::uint32_t>(image.cols);
-        info.height = static_cast<std::uint32_t>(image.rows);
-        info.stride = static_cast<std::uint32_t>(image.step[0]);
-        info.format = image.channels() == 3 ? sdm::PixelFormat::Bgr8 : sdm::PixelFormat::Bgra8;
-        info.timestamp_ns = static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
-                .count());
-        if (!sdm_channel_->write(image.data, bytes, info, error)) return fail(-32'006, std::move(error));
-
-        frame_ = cv::Size(image.cols, image.rows);
-        object result;
-        result["channel"] = sdm_channel_->name();
-        result["seq"] = sdm_channel_->latest_seq();
-        result["width"] = image.cols;
-        result["height"] = image.rows;
-        result["stride"] = info.stride;
-        result["format"] = image.channels() == 3 ? "bgr8" : "bgra8";
-        result["slot_count"] = sdm_channel_->slot_count();
-        result["slot_bytes"] = sdm_channel_->slot_bytes();
-        return ok(std::move(result));
+        if (!write_sdm_frame(captured.value(), error)) return fail(-32'006, std::move(error));
+        frame_ = cv::Size(captured.value().cols, captured.value().rows);
+        return ok(sdm_metadata());
     }
+
+    if (method == "frames.subscribe") {
+        stop_sdm_pump();
+        auto captured = session_.app.capture();
+        if (!captured) return fail(-32'001, captured.error().message());
+        std::string error;
+        if (!write_sdm_frame(captured.value(), error)) return fail(-32'006, std::move(error));
+
+        const double fps = std::clamp(number("fps", 30.0), 1.0, 240.0);
+        const auto interval = std::chrono::milliseconds(std::max(1, static_cast<int>(1000.0 / fps)));
+        sdm_pump_stop_.store(false, std::memory_order_release);
+        sdm_pump_attempts_.store(0, std::memory_order_release);
+        sdm_pump_writes_.store(0, std::memory_order_release);
+        sdm_pump_errors_.store(0, std::memory_order_release);
+        sdm_pump_thread_ = std::thread([this, interval] {
+            while (!sdm_pump_stop_.load(std::memory_order_acquire)) {
+                sdm_pump_attempts_.fetch_add(1, std::memory_order_acq_rel);
+                auto frame = session_.app.capture();
+                if (frame) {
+                    std::string error;
+                    if (write_sdm_frame(frame.value(), error)) {
+                        sdm_pump_writes_.fetch_add(1, std::memory_order_acq_rel);
+                    } else {
+                        sdm_pump_errors_.fetch_add(1, std::memory_order_acq_rel);
+                    }
+                } else {
+                    sdm_pump_errors_.fetch_add(1, std::memory_order_acq_rel);
+                }
+                const auto deadline = std::chrono::steady_clock::now() + interval;
+                while (!sdm_pump_stop_.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
+            }
+        });
+
+        auto metadata = sdm_metadata();
+        metadata["fps"] = fps;
+        metadata["running"] = true;
+        return ok(std::move(metadata));
+    }
+
+    if (method == "frames.unsubscribe") {
+        stop_sdm_pump();
+        auto metadata = sdm_metadata();
+        metadata["running"] = false;
+        return ok(std::move(metadata));
+    }
+
+    if (method == "frames.status") return ok(sdm_metadata());
 
     if (method == "pointer.move" || method == "pointer.click") {
         refresh_frame_size();
@@ -803,6 +895,7 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
     }
 
     if (method == "stop") {
+        stop_sdm_pump();
         session_.app.stop();
         return ok();
     }

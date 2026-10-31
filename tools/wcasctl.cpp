@@ -36,6 +36,9 @@ void usage() {
                  "  select INDEX               select a window\n"
                  "  capture [--out FILE]       capture a PNG (default capture.png)\n"
                  "  capture-sdm [--out FILE]   capture a raw BGR frame via shared memory (default capture.bgr)\n"
+                 "  frames-subscribe [FPS]     start continuous SDM frame publishing\n"
+                 "  frames-unsubscribe         stop continuous SDM frame publishing\n"
+                 "  frames-status              show SDM publisher status\n"
                  "  move X Y                   move the pointer\n"
                  "  click X Y                  click at frame coordinates\n"
                  "  scroll X Y DX DY           scroll at frame coordinates\n"
@@ -223,6 +226,16 @@ int main(int argc, char **argv) {
     std::string rpc_method = command;
     if (command == "capture-sdm") {
         rpc_method = "capture_sdm";
+    } else if (command == "frames-subscribe") {
+        rpc_method = "frames.subscribe";
+        if (arguments.size() >= 2) {
+            params["fps"] = std::stod(arguments[1]);
+            has_params = true;
+        }
+    } else if (command == "frames-unsubscribe") {
+        rpc_method = "frames.unsubscribe";
+    } else if (command == "frames-status") {
+        rpc_method = "frames.status";
     } else if (command == "status") {
         // no params
     } else if (command == "windows") {
@@ -249,7 +262,12 @@ int main(int argc, char **argv) {
     } else if (command == "type" && arguments.size() >= 2) {
         params["text"] = join_arguments(arguments, 1);
         has_params = true;
-    } else if (command != "capture" && command != "capture-sdm" && command != "stop") {
+    } else if (command != "capture"
+               && command != "capture-sdm"
+               && command != "stop"
+               && command != "frames-subscribe"
+               && command != "frames-unsubscribe"
+               && command != "frames-status") {
         std::cerr << "unknown or incomplete command: " << command << "\n";
         usage();
         return 2;
