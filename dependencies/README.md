@@ -27,6 +27,3 @@ cmake -B build/Debug -S . \
   -DWCAS_CMDLY_REPOSITORY=git@github.com:Sukanle/cmdly.git \
   -DWCAS_LIBDRMTAP_REPOSITORY=git@github.com:fxd0h/libdrmtap.git
 ```
-
-默认 libdrmtap 使用上游 `fxd0h/libdrmtap`；如果已有 `Sukanle/libdrmtap` fork，覆盖
-`WCAS_LIBDRMTAP_REPOSITORY` 即可。
