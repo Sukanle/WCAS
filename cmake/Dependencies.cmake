@@ -29,6 +29,24 @@ set(WCAS_LIBDRMTAP_TAG "892fbe0d1b1083e3344a49e31672046a2ebebc24" CACHE STRING "
 set(FETCHCONTENT_QUIET OFF)
 
 # ---------------------------------------------------------------------------
+# toml++: header-only profile configuration parser used by proton-inject.
+# ---------------------------------------------------------------------------
+find_package(tomlplusplus CONFIG QUIET)
+if(NOT tomlplusplus_FOUND)
+    message(STATUS "toml++ not installed; fetching tomlplusplus")
+    FetchContent_Declare(
+        tomlplusplus
+        GIT_REPOSITORY "git@github.com:marzer/tomlplusplus.git"
+        GIT_TAG "v3.4.0"
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS TRUE)
+    FetchContent_MakeAvailable(tomlplusplus)
+endif()
+if(NOT TARGET tomlplusplus::tomlplusplus)
+    message(FATAL_ERROR "tomlplusplus::tomlplusplus is unavailable")
+endif()
+
+# ---------------------------------------------------------------------------
 # ABIX: header-only runtime (plus MICS); prefer an installed package, otherwise
 # clone the repository and build it runtime-only.
 # ---------------------------------------------------------------------------
