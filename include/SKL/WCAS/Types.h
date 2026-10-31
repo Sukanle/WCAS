@@ -3,19 +3,21 @@
 #include <optional>
 
 #include "SKL/ABIX/Model/ABI.h"
+#include "SKL/EPCD/Core/ErrorCode.h"
 
 #include "opencv2/core.hpp"   // IWYU pragma: keep
 #include "boost/outcome.hpp"
+#include "boost/outcome/policy/all_narrow.hpp"
 
 
 namespace skl::wcas {
 
-/// Every public operation reports failure through this result type. It is kept
-/// in its own header so the controller contract can refer to it without pulling
-/// in the whole harness (and so `wcas.h` and `controller.h` do not include each
-/// other).
+/// Every public operation reports failure through EPCD's stable ErrorCode.
+/// It is kept in its own header so the controller contract can refer to it
+/// without pulling in the whole harness (and so `wcas.h` and `controller.h` do
+/// not include each other).
 template<typename T>
-using result = boost::outcome_v2::std_result<T>;
+using result = boost::outcome_v2::result<T, skl::epcd::ErrorCode, boost::outcome_v2::policy::all_narrow>;
 
 template<typename T>
 using optional = std::optional<T>;

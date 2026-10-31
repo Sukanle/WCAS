@@ -20,7 +20,7 @@
 
 namespace skl::wcas {
 namespace {
-std::error_code code(errc value) { return ::skl::make_error_code(value); }
+skl::epcd::ErrorCode code(errc value) { return make_error_code(value); }
 
 #ifdef __linux__
 bool process_is_zombie(pid_t pid) {

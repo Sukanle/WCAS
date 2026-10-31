@@ -8,6 +8,7 @@
 #include <algorithm>
 
 #include "SKL/WCAS/DRM.h"
+#include "SKL/WCAS/Error.h"
 
 #include <fmt/format.h>
 #include <opencv2/imgcodecs.hpp>
@@ -402,30 +403,30 @@ auto capture_via_grim(optional<cv::Rect> rect) -> result<cv::Mat> {
     if (rect.has_value()) command += fmt::format("-g {},{} {}x{}", rect->x, rect->y, rect->width, rect->height);
     command += " \"" + path + "\" 2>/dev/null";
     if (!run_capture(command).has_value()) {
-        return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
     }
     cv::Mat image = decode_png_file(path);
-    if (image.empty()) return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+    if (image.empty()) return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
     return image;
 }
 
 auto capture_via_spectacle() -> result<cv::Mat> {
     const auto path = capture_temp_path();
     if (!run_capture("spectacle -b -n -o \"" + path + "\" 2>/dev/null").has_value()) {
-        return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
     }
     cv::Mat image = decode_png_file(path);
-    if (image.empty()) return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+    if (image.empty()) return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
     return image;
 }
 
 auto capture_gnome_screenshot() -> result<cv::Mat> {
     const auto path = capture_temp_path();
     if (!run_capture("gnome-screenshot -f \"" + path + "\" 2>/dev/null").has_value()) {
-        return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
     }
     cv::Mat image = decode_png_file(path);
-    if (image.empty()) return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+    if (image.empty()) return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
     return image;
 }
 
@@ -435,7 +436,7 @@ auto capture_compositor_screen(uint32_t pid) -> result<cv::Mat> {
     if (auto frame = capture_via_grim(geometry); frame.has_value()) return frame;
     if (auto frame = capture_via_spectacle(); frame.has_value()) return frame;
     if (auto frame = capture_gnome_screenshot(); frame.has_value()) return frame;
-    return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+    return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
 }
 
 namespace {
@@ -475,21 +476,21 @@ auto capture_kms_screen(optional<cv::Rect> crop) -> result<cv::Mat> {
     // the caller falls through to another capture backend.
     drmtap_ctx *ctx = drmtap_open(nullptr);
     if (ctx == nullptr) {
-        return boost::outcome_v2::failure(std::make_error_code(std::errc::permission_denied));
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::permission_denied));
     }
 
     drmtap_frame_info frame{};
     const int grab = drmtap_grab_mapped(ctx, &frame);
     if (grab != 0) {
         drmtap_close(ctx);
-        return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
     }
 
     cv::Mat image = decode_kms_frame(frame);
     drmtap_frame_release(ctx, &frame);
     drmtap_close(ctx);
     if (image.empty()) {
-        return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
     }
 
     if (crop.has_value()) {

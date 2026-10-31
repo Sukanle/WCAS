@@ -1,4 +1,5 @@
 #include "SKL/WCAS/Private/X11Capture.h"
+#include "SKL/WCAS/Error.h"
 
 #include <xcb/composite.h>
 #include <xcb/xcb.h>
@@ -215,12 +216,12 @@ bool x11_frame_has_visible_content(const cv::Mat &image) {
 auto list_x11_windows(const std::string &display, const std::string &xauthority) -> result<std::vector<WindowInfo>> {
     XcbHandle handle(display, xauthority);
     if (handle.connection == nullptr)
-        return boost::outcome_v2::failure(std::make_error_code(std::errc::connection_refused));
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::connection_refused));
     xcb_connection_t *connection = handle.connection;
 
     const xcb_setup_t *setup = xcb_get_setup(connection);
     xcb_screen_t *screen = xcb_setup_roots_iterator(setup).data;
-    if (screen == nullptr) return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+    if (screen == nullptr) return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
 
     std::vector<WindowInfo> windows;
     if (auto *tree = xcb_query_tree_reply(connection, xcb_query_tree(connection, screen->root), nullptr)) {
@@ -261,14 +262,14 @@ auto list_x11_windows(const std::string &display, const std::string &xauthority)
 auto capture_x11_window(const std::string &display, const std::string &xauthority) -> result<cv::Mat> {
     XcbHandle handle(display, xauthority);
     if (handle.connection == nullptr) {
-        return boost::outcome_v2::failure(std::make_error_code(std::errc::connection_refused));
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::connection_refused));
     }
     xcb_connection_t *connection = handle.connection;
 
     const xcb_setup_t *setup = xcb_get_setup(connection);
     xcb_screen_t *screen = xcb_setup_roots_iterator(setup).data;
     if (screen == nullptr) {
-        return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
     }
 
     // Candidate windows: mapped children of the root, largest first. A
@@ -300,7 +301,7 @@ auto capture_x11_window(const std::string &display, const std::string &xauthorit
     if (windows.empty()) {
         cv::Mat root = capture_window(connection, screen->root);
         if (root.empty()) {
-            return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+            return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
         }
         return root;
     }
@@ -314,7 +315,7 @@ auto capture_x11_window(const std::string &display, const std::string &xauthorit
         if (fallback.empty()) fallback = image;
     }
     if (fallback.empty()) {
-        return boost::outcome_v2::failure(std::make_error_code(std::errc::io_error));
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
     }
     return fallback;
 }

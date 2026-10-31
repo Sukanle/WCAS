@@ -22,7 +22,7 @@
 namespace skl::wcas {
 namespace {
 
-std::error_code code(errc value) { return ::skl::make_error_code(value); }
+skl::epcd::ErrorCode code(errc value) { return make_error_code(value); }
 
 #ifdef WCAS_HAVE_XTEST
 using DisplayHandle = Display;

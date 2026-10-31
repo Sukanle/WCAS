@@ -3,6 +3,8 @@
 #include "SKL/EPCD/Interface/CategoryRegistry.h"
 
 #include <cstddef>
+#include <cstdio>
+#include <string>
 
 namespace skl::wcas {
 namespace {
@@ -27,37 +29,17 @@ bool registration_available(::skl::epcd::iface::CategoryStatus status) noexcept 
 
 }   // namespace
 
-const error_category &error_category::instance() noexcept {
-    static error_category instance;
-    return instance;
-}
+std::string error_message(const ::skl::epcd::ErrorCode &code) {
+    if (code.ok()) return "success";
 
-const char *error_category::name() const noexcept { return "skl.wcas"; }
-
-std::string error_category::message(int ev) const {
-    const char *text = ::skl::epcd::message(WcasError_domain, ev);
-    return text != nullptr ? text : "Invalid error, illegal out-of-bounds";
-}
-
-const char *error_category::module() const noexcept { return "wcas"; }
-
-std::error_condition error_category::default_error_condition(int ev) const noexcept {
-    if (ev == 0) return {0, std::generic_category()};
-
-    const auto condition = ::skl::epcd::default_condition(WcasError_domain, ev);
-    switch (::skl::epcd::to_generic_condition(condition)) {
-        case ::skl::epcd::GenericCondition::address_in_use: return std::make_error_condition(std::errc::address_in_use);
-        case ::skl::epcd::GenericCondition::protocol_not_supported:
-            return std::make_error_condition(std::errc::protocol_not_supported);
-        case ::skl::epcd::GenericCondition::permission_denied:
-            return std::make_error_condition(std::errc::permission_denied);
-        case ::skl::epcd::GenericCondition::io_error:      return std::make_error_condition(std::errc::io_error);
-        case ::skl::epcd::GenericCondition::timed_out:     return std::make_error_condition(std::errc::timed_out);
-        case ::skl::epcd::GenericCondition::not_supported: return std::make_error_condition(std::errc::not_supported);
-        case ::skl::epcd::GenericCondition::no_child_process:
-            return std::make_error_condition(std::errc::no_child_process);
-        default: return {ev, *this};
+    if (code.domain == WcasError_domain.descriptor.domain) {
+        if (const char *text = ::skl::epcd::message(WcasError_domain, code.value); text != nullptr) return text;
     }
+
+    char buffer[96] = {};
+    std::snprintf(buffer, sizeof(buffer), "error domain 0x%016llx code %d",
+        static_cast<unsigned long long>(code.domain), static_cast<int>(code.value));
+    return buffer;
 }
 
 bool register_errors() noexcept { return registration_available(registration_status()); }
@@ -67,9 +49,3 @@ bool errors_registered() noexcept { return registration_available(registration_s
 [[maybe_unused]] const bool wcas_epcd_registration = register_errors();
 
 }   // namespace skl::wcas
-
-namespace skl {
-std::error_code make_error_code(wcas::errc ec) noexcept {
-    return {static_cast<int>(ec), wcas::error_category::instance()};
-}
-}   // namespace skl

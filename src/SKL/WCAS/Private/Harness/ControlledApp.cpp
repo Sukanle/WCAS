@@ -24,7 +24,7 @@
 
 namespace skl::wcas {
 namespace {
-std::error_code code(errc value) { return ::skl::make_error_code(value); }
+skl::epcd::ErrorCode code(errc value) { return make_error_code(value); }
 
 // Route synthetic input to the app's own surface, not whichever surface
 // happened to receive a compositor enter earlier. Prefers the surface already
@@ -95,7 +95,8 @@ void pump_loop(ControlledApp::Impl *impl) {
             auto frame = capture_once(impl);
             if (!frame) {
                 if (consecutive_errors++ == 0 && impl->frames)
-                    impl->frames->publish_error(static_cast<int32_t>(frame.error().value()), frame.error().message());
+                    impl->frames->publish_error(
+                        static_cast<int32_t>(frame.error().value), skl::wcas::error_message(frame.error()));
             } else {
                 consecutive_errors = 0;
                 const auto &image = frame.value();

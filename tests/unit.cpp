@@ -69,12 +69,12 @@ int main() {
     assert(skl::wcas::proxy::is_denied_global("ext_session_lock_manager_v1"));
     assert(!skl::wcas::proxy::is_denied_global("wl_compositor"));
 
-    assert(skl::make_error_code(skl::wcas::errc::feature_not_implemented).message().find("not implemented")
+    assert(skl::wcas::error_message(skl::wcas::make_error_code(skl::wcas::errc::feature_not_implemented))
+               .find("not implemented")
            != std::string::npos);
 
     // WCAS errors are an EPCD static domain and are registered with EPCD's
-    // category registry. The legacy std::error_code adapter reads the same
-    // table, so both APIs describe the same numeric values.
+    // category registry. Public results carry EPCD ErrorCode values directly.
     assert(skl::wcas::errors_registered());
     assert(skl::wcas::register_errors());
     assert(skl::epcd::domain_owner(skl::wcas::WcasError_domain.descriptor.domain) == skl::epcd::owner_skl);
@@ -82,8 +82,9 @@ int main() {
            == skl::epcd::make_error_code(skl::wcas::WcasError_domain, 0x000C));
     assert(std::string(skl::epcd::message(skl::wcas::WcasError_domain, 0x000C)).find("not implemented")
            != std::string::npos);
-    assert(skl::make_error_code(skl::wcas::errc::socket_bind_failed) == std::errc::address_in_use);
-    assert(skl::make_error_code(skl::wcas::errc::feature_not_implemented) == std::errc::not_supported);
+    const auto os_error = skl::wcas::from_std_errc(std::errc::address_in_use);
+    assert(os_error.domain == skl::epcd::domain::std_compat);
+    assert(os_error.value == static_cast<skl::epcd::ErrorValue>(std::errc::address_in_use));
 
     // One process can open several Wayland connections (Wine). They must all be
     // tracked: keying sessions by pid used to hide every connection but the

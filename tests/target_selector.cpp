@@ -1,4 +1,5 @@
 #include "SKL/WCAS/Private/Harness/TargetSelector.h"
+#include "SKL/WCAS/Error.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -19,7 +20,7 @@ public:
     std::string name() const { return "fake-target"; }
     bool available() const { return true; }
     result<void> select(int32_t index) {
-        if (index != 1) return std::make_error_code(std::errc::invalid_argument);
+        if (index != 1) return skl::wcas::from_std_errc(std::errc::invalid_argument);
         selected_ = 77;
         return boost::outcome_v2::success();
     }

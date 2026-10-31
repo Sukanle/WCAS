@@ -1,4 +1,5 @@
 #include "SKL/WCAS/WCAS.h"
+#include "SKL/WCAS/Error.h"
 #include "SKL/WCAS/DMABUF.h"
 #include "SKL/WCAS/Private/IPC/Protocol.h"
 #include "SKL/WCAS/Private/IPC/Server.h"
@@ -391,7 +392,7 @@ optional<Session> launch_session(const Options &options) {
                               .bridge_geometry(options.bridge_width, options.bridge_height)
                               .build();
     if (!harness_result) {
-        fmt::println("{}", harness_result.error());
+        fmt::println("{}", error_message(harness_result.error()));
         return std::nullopt;
     }
     // std::move is required: `result` is move-only.
@@ -399,7 +400,7 @@ optional<Session> launch_session(const Options &options) {
 
     auto launched = harness.value().launch(make_launch_config(options));
     if (!launched) {
-        fmt::println("{}", launched.error());
+        fmt::println("{}", error_message(launched.error()));
         return std::nullopt;
     }
     auto app = std::move(launched.value());
@@ -463,7 +464,7 @@ private:
     bool wait_for_new_frame(const FrameBarrier &before, int timeout_ms) const;
 
     // input helpers
-    void report_error(const std::error_code &error) const;
+    void report_error(const skl::epcd::ErrorCode &error) const;
     void sleep_for_key_delay() const;
     void move_cursor();
     void move_to(double x, double y);
@@ -571,7 +572,7 @@ Shell::Shell(Session session, Options options)
     if (result) {
         controller_ = std::move(result.value());
     } else {
-        fmt::println(stderr, "controller: {}", result.error().message());
+        fmt::println(stderr, "controller: {}", error_message(result.error()));
     }
 }
 
@@ -757,7 +758,7 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
 
     if (method == "capture") {
         auto captured = session_.app.capture();
-        if (!captured) return fail(-32'001, captured.error().message());
+        if (!captured) return fail(-32'001, error_message(captured.error()));
         std::vector<unsigned char> encoded;
         if (!cv::imencode(".png", captured.value(), encoded)) return fail(-32'002, "PNG encoding failed");
         frame_ = cv::Size(captured.value().cols, captured.value().rows);
@@ -772,7 +773,7 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
 
     if (method == "capture_sdm") {
         auto captured = session_.app.capture();
-        if (!captured) return fail(-32'001, captured.error().message());
+        if (!captured) return fail(-32'001, error_message(captured.error()));
         std::string error;
         if (!write_sdm_frame(captured.value(), error)) return fail(-32'006, std::move(error));
         frame_ = cv::Size(captured.value().cols, captured.value().rows);
@@ -782,7 +783,7 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
     if (method == "frames.subscribe") {
         stop_sdm_pump();
         auto captured = session_.app.capture();
-        if (!captured) return fail(-32'001, captured.error().message());
+        if (!captured) return fail(-32'001, error_message(captured.error()));
         std::string error;
         if (!write_sdm_frame(captured.value(), error)) return fail(-32'006, std::move(error));
 
@@ -833,7 +834,7 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         const double x = clamp_axis(number("x", frame_.width / 2.0), frame_.width);
         const double y = clamp_axis(number("y", frame_.height / 2.0), frame_.height);
         auto result = method == "pointer.click" ? controller_.click({x, y}) : controller_.move({x, y});
-        if (!result) return fail(-32'003, result.error().message());
+        if (!result) return fail(-32'003, error_message(result.error()));
         mouse_x_ = x;
         mouse_y_ = y;
         cursor_is_device_ = false;
@@ -847,7 +848,7 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         const int dx = static_cast<int>(number("dx", 0.0));
         const int dy = static_cast<int>(number("dy", 0.0));
         auto result = controller_.scroll({x, y}, {dx, dy});
-        if (!result) return fail(-32'003, result.error().message());
+        if (!result) return fail(-32'003, error_message(result.error()));
         return ok();
     }
 
@@ -856,7 +857,7 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         if (combination.empty()) return fail(-32'602, "missing combo");
         const auto hold = std::chrono::milliseconds(static_cast<int>(number("hold_ms", 50.0)));
         auto result = controller_.key(combination, hold);
-        if (!result) return fail(-32'003, result.error().message());
+        if (!result) return fail(-32'003, error_message(result.error()));
         return ok();
     }
 
@@ -864,7 +865,7 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         const std::string value = text("text");
         if (value.empty()) return fail(-32'602, "missing text");
         auto result = controller_.type_text(value);
-        if (!result) return fail(-32'003, result.error().message());
+        if (!result) return fail(-32'003, error_message(result.error()));
         return ok();
     }
 
@@ -890,7 +891,7 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         const int index = static_cast<int>(number("index", -1.0));
         if (index < 0) return fail(-32'602, "missing index");
         auto result = session_.app.select_window(index);
-        if (!result) return fail(-32'004, result.error().message());
+        if (!result) return fail(-32'004, error_message(result.error()));
         return ok();
     }
 
@@ -1018,8 +1019,8 @@ bool Shell::wait_for_new_frame(const FrameBarrier &before, int timeout_ms) const
 
 // ── input helpers ───────────────────────────────────────────────────────────
 
-void Shell::report_error(const std::error_code &error) const {
-    fmt::println(stderr, "[{}] {}", error, error.message());
+void Shell::report_error(const skl::epcd::ErrorCode &error) const {
+    fmt::println(stderr, "[{}:{}] {}", error.domain, error.value, error_message(error));
 }
 
 void Shell::sleep_for_key_delay() const {
@@ -1220,7 +1221,8 @@ void Shell::capture_screenshot(bool wait_fresh) {
 
     auto captured = session_.app.capture();
     if (!captured) {
-        fmt::println(stderr, "capture failed: [{}] {}", captured.error(), captured.error().message());
+        fmt::println(stderr, "capture failed: [{}:{}] {}", captured.error().domain, captured.error().value,
+            error_message(captured.error()));
         return;
     }
     auto name = fmt::format("screenshot-{:02}.png", ++screenshot_);
@@ -1436,7 +1438,7 @@ void Shell::cmd_right(std::istringstream &) { nudge(false, true); }
 void Shell::cmd_center(std::istringstream &) {
     auto captured = session_.app.capture();
     if (!captured) {
-        fmt::println("capture failed: {}", captured.error());
+        fmt::println("capture failed: {}", error_message(captured.error()));
         return;
     }
     frame_ = cv::Size(captured.value().cols, captured.value().rows);

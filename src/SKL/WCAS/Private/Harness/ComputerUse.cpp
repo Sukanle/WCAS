@@ -36,7 +36,7 @@
 
 namespace skl::wcas {
 namespace {
-std::error_code code(errc value) { return ::skl::make_error_code(value); }
+skl::epcd::ErrorCode code(errc value) { return make_error_code(value); }
 
 std::string runtime_directory() {
     const char *v = std::getenv("XDG_RUNTIME_DIR");
@@ -406,7 +406,7 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
 
     // The launch order is a strategy contract; each strategy still delegates
     // fork/exec/wait to ProcessHost via `attempt`.
-    std::error_code last_error = code(errc::native_wayland_timeout);
+    skl::epcd::ErrorCode last_error = code(errc::native_wayland_timeout);
     for (const auto &strategy : launch_strategies()) {
         if (!strategy.available()) continue;
         switch (strategy.kind()) {
