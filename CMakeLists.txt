@@ -168,8 +168,11 @@ if(NOT TARGET libdrmtap::drmtap)
         wcas-libdrmtap
         SOURCE_DIR "${DRMTAP_SOURCE_DIR}"
         BINARY_DIR "${DRMTAP_BUILD_DIR}"
+        # Wipe the Meson build tree before setup. Upgrades can move libdrmtap
+        # from third_party/ to _deps/, and Meson rejects the stale coredata
+        # (it still points at the old source and may not know newer options).
         CONFIGURE_COMMAND
-            "${MESON_EXECUTABLE}" setup "<BINARY_DIR>" "<SOURCE_DIR>" --backend=ninja
+            "${MESON_EXECUTABLE}" setup --wipe "<BINARY_DIR>" "<SOURCE_DIR>" --backend=ninja
             --prefix=${CMAKE_CURRENT_BINARY_DIR}/libdrmtap-prefix -Dhelper=${DRMTAP_HELPER_FEATURE}
             -Degl=${DRMTAP_EGL_FEATURE}
         BUILD_COMMAND "${MESON_EXECUTABLE}" compile -C "<BINARY_DIR>"
