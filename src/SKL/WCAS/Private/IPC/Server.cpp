@@ -1,17 +1,20 @@
 #include "SKL/WCAS/Private/IPC/Server.h"
 
 #include <boost/asio/socket_base.hpp>
+#include <boost/asio/error.hpp>
 
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <system_error>
+#include <thread>
 #include <utility>
 
 namespace skl::wcas::ipc {
@@ -83,6 +86,11 @@ bool IpcServer::start(std::string &error) {
         error = "listen " + path_ + ": " + asio_error.message();
         return false;
     }
+    acceptor_->non_blocking(true, asio_error);
+    if (asio_error) {
+        error = "non-blocking " + path_ + ": " + asio_error.message();
+        return false;
+    }
 
     if (!directory.empty()) {
         const std::filesystem::path latest = directory / "latest";
@@ -104,6 +112,10 @@ void IpcServer::run() {
         acceptor_->accept(*socket, error);
         if (error) {
             if (!running_.load(std::memory_order_acquire)) break;
+            if (error != boost::asio::error::would_block && error != boost::asio::error::try_again) {
+                continue;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
             continue;
         }
         {
