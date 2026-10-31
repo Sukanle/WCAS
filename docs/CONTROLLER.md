@@ -322,5 +322,5 @@ lease 保证模块不会在缓存的函数指针仍被使用时卸载。模块�
 
 ## 6. 相关文档
 
-- [ABIX Interface 文档](../third_party/ABIX/docs/abix/interface_zh.md)
-- [ABIX 无 AMC 用法](../third_party/ABIX/docs/abix/without_amc_zh.md)
+- [ABIX Interface 文档](https://github.com/Sukanle/ABIX/blob/v0.2.3/docs/abix/interface_zh.md)
+- [ABIX 无 AMC 用法](https://github.com/Sukanle/ABIX/blob/v0.2.3/docs/abix/without_amc_zh.md)

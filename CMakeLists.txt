@@ -21,19 +21,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgcodecs imgproc CONFIG)
 find_package(Boost REQUIRED COMPONENTS filesystem system program_options json CONFIG)
 find_package(Threads REQUIRED)
 find_package(fmt REQUIRED)
-# ABIX is vendored so the runtime headers track the pinned submodule. 0.2.3's runtime-only mode builds just the
-# header-only ABIX::runtime target (plus MICS); it skips AMC, DLLs, tests and install rules, so no LLVM/Clang or
-# separate ABIX installation is needed. Packagers can opt into an installed package with -DWCAS_USE_SYSTEM_ABIX=ON.
-option(WCAS_USE_SYSTEM_ABIX "Use an installed ABIX CMake package instead of third_party/ABIX" OFF)
-if(WCAS_USE_SYSTEM_ABIX)
-    find_package(ABIX 0.2.3 CONFIG REQUIRED COMPONENTS runtime)
-else()
-    set(ABIX_BUILD_RUNTIME_ONLY ON)
-    set(ABIX_INSTALL OFF)
-    set(ABIX_INSTALL_BUNDLED_MICS OFF)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/ABIX ${CMAKE_CURRENT_BINARY_DIR}/third_party/ABIX
-                     EXCLUDE_FROM_ALL)
-endif()
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Dependencies.cmake)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WAYLAND REQUIRED IMPORTED_TARGET wayland-client wayland-server)
 pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
@@ -164,32 +152,40 @@ endfunction()
 wcas_meson_feature(DRMTAP_HELPER_FEATURE "${DRMTAP_HELPER}")
 wcas_meson_feature(DRMTAP_EGL_FEATURE "${DRMTAP_EGL}")
 
-set(DRMTAP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libdrmtap")
 set(DRMTAP_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/libdrmtap-build")
 set(DRMTAP_VERSION "0.5.5")
-set(DRMTAP_LIBRARY "${DRMTAP_BUILD_DIR}/libdrmtap.so.${DRMTAP_VERSION}")
 
-# libdrmtap is Meson-owned. Keep its source tree untouched and use an imported target so WCAS consumers can link it like
-# any other CMake library.
-ExternalProject_Add(
-    wcas-libdrmtap
-    SOURCE_DIR "${DRMTAP_SOURCE_DIR}"
-    BINARY_DIR "${DRMTAP_BUILD_DIR}"
-    CONFIGURE_COMMAND
-        "${MESON_EXECUTABLE}" setup "<BINARY_DIR>" "<SOURCE_DIR>" --backend=ninja
-        --prefix=${CMAKE_CURRENT_BINARY_DIR}/libdrmtap-prefix -Dhelper=${DRMTAP_HELPER_FEATURE}
-        -Degl=${DRMTAP_EGL_FEATURE}
-    BUILD_COMMAND "${MESON_EXECUTABLE}" compile -C "<BINARY_DIR>"
-    INSTALL_COMMAND "${MESON_EXECUTABLE}" install -C "<BINARY_DIR>"
-    BUILD_BYPRODUCTS "${DRMTAP_LIBRARY}"
-    USES_TERMINAL_CONFIGURE TRUE
-    USES_TERMINAL_BUILD TRUE
-    USES_TERMINAL_INSTALL TRUE)
+# libdrmtap is Meson-owned. If an installed copy was found, use its imported
+# target. Otherwise cmake/Dependencies.cmake has already populated the source
+# and this ExternalProject builds it.
+if(NOT TARGET libdrmtap::drmtap)
+    if(NOT DEFINED DRMTAP_SOURCE_DIR OR NOT EXISTS "${DRMTAP_SOURCE_DIR}/meson.build")
+        message(FATAL_ERROR "libdrmtap source is unavailable; install libdrmtap or set "
+                            "WCAS_LIBDRMTAP_REPOSITORY")
+    endif()
+    set(DRMTAP_LIBRARY "${DRMTAP_BUILD_DIR}/libdrmtap.so.${DRMTAP_VERSION}")
+    ExternalProject_Add(
+        wcas-libdrmtap
+        SOURCE_DIR "${DRMTAP_SOURCE_DIR}"
+        BINARY_DIR "${DRMTAP_BUILD_DIR}"
+        CONFIGURE_COMMAND
+            "${MESON_EXECUTABLE}" setup "<BINARY_DIR>" "<SOURCE_DIR>" --backend=ninja
+            --prefix=${CMAKE_CURRENT_BINARY_DIR}/libdrmtap-prefix -Dhelper=${DRMTAP_HELPER_FEATURE}
+            -Degl=${DRMTAP_EGL_FEATURE}
+        BUILD_COMMAND "${MESON_EXECUTABLE}" compile -C "<BINARY_DIR>"
+        INSTALL_COMMAND "${MESON_EXECUTABLE}" install -C "<BINARY_DIR>"
+        BUILD_BYPRODUCTS "${DRMTAP_LIBRARY}"
+        USES_TERMINAL_CONFIGURE TRUE
+        USES_TERMINAL_BUILD TRUE
+        USES_TERMINAL_INSTALL TRUE)
 
-add_library(libdrmtap::drmtap SHARED IMPORTED GLOBAL)
-set_target_properties(libdrmtap::drmtap PROPERTIES IMPORTED_LOCATION "${DRMTAP_LIBRARY}" INTERFACE_INCLUDE_DIRECTORIES
-                                                                                         "${DRMTAP_SOURCE_DIR}/include")
-add_dependencies(libdrmtap::drmtap wcas-libdrmtap)
+    add_library(libdrmtap::drmtap SHARED IMPORTED GLOBAL)
+    set_target_properties(
+        libdrmtap::drmtap
+        PROPERTIES IMPORTED_LOCATION "${DRMTAP_LIBRARY}" INTERFACE_INCLUDE_DIRECTORIES
+                   "${DRMTAP_SOURCE_DIR}/include")
+    add_dependencies(libdrmtap::drmtap wcas-libdrmtap)
+endif()
 
 add_library(
     WCAS SHARED
@@ -235,7 +231,7 @@ target_include_directories(WCAS PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_
 target_include_directories(WCAS PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(
     WCAS
-    PUBLIC ${OpenCV_LIBS} fmt::fmt ABIX::runtime
+    PUBLIC ${OpenCV_LIBS} fmt::fmt ABIX::runtime ${WCAS_EPCD_TARGETS}
     PRIVATE Boost::filesystem
             Boost::system
             PkgConfig::WAYLAND
@@ -255,24 +251,24 @@ if(EGL_FOUND
     target_compile_definitions(WCAS PRIVATE WCAS_HAVE_EGL=1)
     target_link_libraries(WCAS PRIVATE PkgConfig::EGL PkgConfig::GLESV2 PkgConfig::GBM)
 endif()
-set_property(
-    TARGET WCAS
-    APPEND
-    PROPERTY BUILD_RPATH "${DRMTAP_BUILD_DIR}")
+if(WCAS_DRMTAP_FETCHED)
+    set_property(
+        TARGET WCAS
+        APPEND
+        PROPERTY BUILD_RPATH "${DRMTAP_BUILD_DIR}")
+endif()
 
-# cmdly is the line editor behind the interactive console of the test harness. Only its library is added: the
-# submodule's top-level CMakeLists rewrites the build-tree compile_commands.json, and its tests need googletest, so
-# BUILD_TESTING is shadowed to OFF for the duration of the add_subdirectory.
-set(_wcas_build_testing "${BUILD_TESTING}")
-set(BUILD_TESTING OFF)
-add_subdirectory(third_party/cmdly/libcmdly cmdly EXCLUDE_FROM_ALL)
-set(BUILD_TESTING "${_wcas_build_testing}")
-unset(_wcas_build_testing)
+# cmdly is the line editor behind the interactive console of the test harness.
+# Dependencies.cmake finds an installed package or fetches only libcmdly.
+if(NOT WCAS_CMDLY_TARGET)
+    message(FATAL_ERROR "cmdly was not found or fetched")
+endif()
 
 add_executable(wcas-example main.cpp)
 target_link_libraries(wcas-example PRIVATE WCAS::WCAS)
 add_executable(proton-inject proton-inject.cpp)
-target_link_libraries(proton-inject PRIVATE WCAS::WCAS wcas-ipc wcas-sdm Boost::program_options cmdly_static)
+target_link_libraries(proton-inject PRIVATE WCAS::WCAS wcas-ipc wcas-sdm Boost::program_options
+                                             ${WCAS_CMDLY_TARGET})
 add_executable(wcasctl tools/wcasctl.cpp)
 target_link_libraries(wcasctl PRIVATE wcas-ipc wcas-sdm)
 install(TARGETS wcasctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -336,13 +332,15 @@ if(BUILD_TESTING)
 endif()
 install(TARGETS WCAS LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(DIRECTORY include/SKL DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-# WCAS public headers include SKL/ABIX/...; ABIX itself is not installed into this prefix (the vendored submodule is
+# WCAS public headers include SKL/ABIX/...; ABIX itself is not installed into this prefix (the fetched dependency is
 # built runtime-only for WCAS). Consumers must provide ABIX themselves, e.g. find_package(ABIX 0.2.3 CONFIG REQUIRED).
-install(
-    DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libdrmtap-prefix/lib/"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    FILES_MATCHING
-    PATTERN "libdrmtap.so*")
-install(FILES "${DRMTAP_SOURCE_DIR}/include/drmtap.h" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+if(WCAS_DRMTAP_FETCHED)
+    install(
+        DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libdrmtap-prefix/lib/"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        FILES_MATCHING
+        PATTERN "libdrmtap.so*")
+    install(FILES "${DRMTAP_SOURCE_DIR}/include/drmtap.h" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+endif()
 
 file(CREATE_LINK ${CMAKE_BINARY_DIR}/compile_commands.json ${CMAKE_BINARY_DIR}/../compile_commands.json SYMBOLIC)
