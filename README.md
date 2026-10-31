@@ -397,6 +397,9 @@ wcasctl status                             # pid/frame/windows/transport
 wcasctl windows                            # 窗口列表
 wcasctl capture --out shot.png             # PNG 截图
 wcasctl capture-sdm --out frame.bgr        # 共享内存 raw BGR（无 PNG/base64）
+wcasctl frames-subscribe 30                # 后台连续写入 SDM ring（30fps）
+wcasctl frames-status                      # 查看持续发布状态/seq
+wcasctl frames-unsubscribe                 # 停止持续发布
 wcasctl click 640 360                      # frame 坐标
 wcasctl move 640 360
 wcasctl key ctrl+a
@@ -412,6 +415,8 @@ socket 默认位于 `$XDG_RUNTIME_DIR/wcas/<pid>.sock`，`latest` 指向最近�
 - `capture`：PNG + base64，适合低频 OCR；
 - `capture-sdm`：返回共享内存 channel，客户端直接读取 raw BGR/BGRA，避免 PNG/base64
   和 UDS 像素传输；帧带 `width/height/stride/format`，由客户端按 stride 解析。
+- `frames-subscribe`：后台定时捕获并持续写入同一 ring；`frames-status` 返回
+  `running/attempts/writes/errors` 与最新 `seq`，MAA 可自行 `wait_for_frame`。
 
 键盘注入需要目标窗口获得键盘焦点；若窗口不接收键盘，可在启动时加
 `--allow-activation`，或先用 `move/click` 激活目标窗口。
