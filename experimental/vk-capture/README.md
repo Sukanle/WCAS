@@ -40,6 +40,15 @@ The receiver prints frame metadata and can write the first frame as a raw
 frame 1: 1915x2110 stride=7680 format=37 fd=5
 ```
 
+It can also publish the frames into the existing WCAS SDM ring:
+
+```sh
+./build/experimental/vk-capture/wcas-vk-receiver \
+  --socket /tmp/wcas-vk.sock --sdm wcas-vk-test
+```
+
+The SDM name is the same kind of name accepted by `wcasctl capture-sdm`.
+
 ## Scope and limitations
 
 - Linux/64-bit, Vulkan only.
@@ -48,7 +57,8 @@ frame 1: 1915x2110 stride=7680 format=37 fd=5
 - The copy destination is linear, so this path avoids the compositor's compressed
   DMA-BUF modifier, at the cost of a GPU copy.
 - One queue family (index 0) is assumed for the copy command pool.
-- The receiver is a diagnostic tool; it is not wired into WCAS `FrameBus`/SDM yet.
+- The receiver can write into a WCAS SDM channel, but it is not yet wired into the
+  production `FrameBus` lifecycle or control plane.
 - Present-driven: if the application stops rendering, no new frames are produced.
 - Not suitable for QtWebEngine/XWayland-only targets; use the regular WCAS private
   proxy path for those.

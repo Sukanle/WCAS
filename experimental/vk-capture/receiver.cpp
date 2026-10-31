@@ -12,7 +12,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <memory>
 #include <string>
+
+#include "SKL/WCAS/Private/SDM/Channel.h"
 
 namespace {
 
@@ -49,12 +53,15 @@ int receive_fd(int socket_fd, FrameHeader &header) {
 int main(int argc, char **argv) {
     std::string socket_path = "/tmp/wcas-vk.sock";
     std::string output;
+    std::string sdm_name;
     bool once = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--socket") == 0 && i + 1 < argc)
             socket_path = argv[++i];
         else if (std::strcmp(argv[i], "--out") == 0 && i + 1 < argc)
             output = argv[++i];
+        else if (std::strcmp(argv[i], "--sdm") == 0 && i + 1 < argc)
+            sdm_name = argv[++i];
         else if (std::strcmp(argv[i], "--once") == 0)
             once = true;
     }
@@ -79,6 +86,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     std::printf("listening on %s\n", socket_path.c_str());
+    std::unique_ptr<skl::wcas::sdm::Channel> sdm_channel;
 
     while (true) {
         const int client = ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC);
@@ -96,16 +104,43 @@ int main(int argc, char **argv) {
             std::printf("frame %llu: %ux%u stride=%u format=%u fd=%d\n",
                 static_cast<unsigned long long>(header.sequence), header.width, header.height, header.stride,
                 header.format, fd);
-            if (!output.empty() && frames == 1) {
-                const size_t size = static_cast<size_t>(header.stride) * header.height;
-                if (void *map = ::mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0); map != MAP_FAILED) {
+            const size_t size = static_cast<size_t>(header.stride) * header.height;
+            if (void *map = ::mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0); map != MAP_FAILED) {
+                if (!output.empty() && frames == 1) {
                     if (FILE *file = std::fopen(output.c_str(), "wb"); file != nullptr) {
                         std::fwrite(map, 1, size, file);
                         std::fclose(file);
                         std::printf("wrote %s (%zu bytes)\n", output.c_str(), size);
                     }
-                    ::munmap(map, size);
                 }
+                if (!sdm_name.empty()) {
+                    if (!sdm_channel) {
+                        if (size > std::numeric_limits<std::uint32_t>::max()) {
+                            std::fprintf(stderr, "frame too large for SDM: %zu\n", size);
+                        } else {
+                            skl::wcas::sdm::Config config;
+                            config.slot_bytes = static_cast<std::uint32_t>(size);
+                            std::string error;
+                            sdm_channel = skl::wcas::sdm::Channel::create(sdm_name, config, error);
+                            if (!sdm_channel)
+                                std::fprintf(stderr, "SDM create failed: %s\n", error.c_str());
+                            else
+                                std::printf("SDM channel: %s\n", sdm_name.c_str());
+                        }
+                    }
+                    if (sdm_channel) {
+                        skl::wcas::sdm::FrameInfo info{};
+                        info.width = header.width;
+                        info.height = header.height;
+                        info.stride = header.stride;
+                        info.format = skl::wcas::sdm::PixelFormat::Bgra8;
+                        info.timestamp_ns = 0;
+                        std::string error;
+                        if (!sdm_channel->write(map, size, info, error))
+                            std::fprintf(stderr, "SDM write failed: %s\n", error.c_str());
+                    }
+                }
+                ::munmap(map, size);
             }
             ::close(fd);
             if (once) break;

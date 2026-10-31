@@ -21,6 +21,8 @@ configure_file(
 add_executable(wcas-vk-receiver receiver.cpp)
 target_compile_features(wcas-vk-receiver PRIVATE cxx_std_20)
 target_compile_options(wcas-vk-receiver PRIVATE -Wall -Wextra)
+target_include_directories(wcas-vk-receiver PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(wcas-vk-receiver PRIVATE wcas-sdm)
 
 install(TARGETS wcas-vk-layer LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/wcas-vk")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/VkLayer_WCAS_vk_capture.json"
