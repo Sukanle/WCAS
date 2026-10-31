@@ -284,6 +284,13 @@ ctest --test-dir build/Debug --output-on-failure
 
 Lutris 用 `proton-inject-lutris.sh`。
 
+QtWebEngine 启动器（例如鹰角启动器）在 Wine Wayland 下可能白屏或无响应；这类启动器
+应直接使用 XWayland：
+
+```sh
+./proton-inject.sh "/path/to/Launcher.exe" --transport xwayland
+```
+
 ### 7.2 直接用 CLI
 
 ```sh
