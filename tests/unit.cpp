@@ -72,6 +72,19 @@ int main() {
     assert(skl::make_error_code(skl::wcas::errc::feature_not_implemented).message().find("not implemented")
            != std::string::npos);
 
+    // WCAS errors are an EPCD static domain and are registered with EPCD's
+    // category registry. The legacy std::error_code adapter reads the same
+    // table, so both APIs describe the same numeric values.
+    assert(skl::wcas::errors_registered());
+    assert(skl::wcas::register_errors());
+    assert(skl::epcd::domain_owner(skl::wcas::WcasError_domain.descriptor.domain) == skl::epcd::owner_skl);
+    assert(skl::wcas::make_error_code(skl::wcas::errc::feature_not_implemented)
+           == skl::epcd::make_error_code(skl::wcas::WcasError_domain, 0x000C));
+    assert(std::string(skl::epcd::message(skl::wcas::WcasError_domain, 0x000C)).find("not implemented")
+           != std::string::npos);
+    assert(skl::make_error_code(skl::wcas::errc::socket_bind_failed) == std::errc::address_in_use);
+    assert(skl::make_error_code(skl::wcas::errc::feature_not_implemented) == std::errc::not_supported);
+
     // One process can open several Wayland connections (Wine). They must all be
     // tracked: keying sessions by pid used to hide every connection but the
     // last, which made a second window invisible to `list`/`target`.

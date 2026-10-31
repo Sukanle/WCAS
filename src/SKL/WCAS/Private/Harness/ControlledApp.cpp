@@ -24,7 +24,7 @@
 
 namespace skl::wcas {
 namespace {
-std::error_code code(errc value) { return make_error_code(value); }
+std::error_code code(errc value) { return ::skl::make_error_code(value); }
 
 // Route synthetic input to the app's own surface, not whichever surface
 // happened to receive a compositor enter earlier. Prefers the surface already

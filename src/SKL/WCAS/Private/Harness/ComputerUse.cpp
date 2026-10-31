@@ -36,7 +36,7 @@
 
 namespace skl::wcas {
 namespace {
-std::error_code code(errc value) { return make_error_code(value); }
+std::error_code code(errc value) { return ::skl::make_error_code(value); }
 
 std::string runtime_directory() {
     const char *v = std::getenv("XDG_RUNTIME_DIR");
