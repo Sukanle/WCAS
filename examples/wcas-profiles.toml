@@ -1,0 +1,68 @@
+# WCAS launch profiles
+#
+# The launcher/game commands below use the host filesystem. Paths may start
+# with `~`; WCAS expands it before handing the command to Wine/Proton.
+# Single-quoted TOML strings are used so Windows-style backslashes do not need
+# escaping.
+
+version = 1
+default = "hypergryph-launcher"
+
+[env]
+WINEPREFIX = '~/Games/hypergryph'
+PROTONPATH = '~/.local/share/Steam/compatibilitytools.d/DW-Proton Latest'
+
+[[profiles]]
+id = "hypergryph-launcher"
+target = "Hypergryph Launcher"
+type = "launcher"
+mode = "umu"                 # umu-run + Proton
+transport = "xwayland"       # QtWebEngine/Wine Wayland is currently white-screen
+graphics = "auto"            # do not force a graphics backend
+command = '~/Games/hypergryph/drive_c/Program Files/Hypergryph Launcher/Launcher.exe'
+
+# Optional: used by parent-spoof game profiles that depend on this launcher.
+# "auto" means find the newest <install>/<version>/Games.exe.
+games_exe = "auto"
+
+
+[[profiles]]
+id = "arknights"
+target = "Arknights"
+type = "game"
+mode = "umu"
+transport = "wayland"
+graphics = "opengl"          # WineD3D
+command = '~/Games/hypergryph/drive_c/Program Files/Hypergryph Launcher/games/Arknights/Arknights.exe'
+match = 'Arknights.exe|PlatformProcess.exe'
+
+# Arknights does not need the official launcher at runtime, but keeping the
+# dependency documents which installation supplies the game files.
+dependencies = ["hypergryph-launcher"]
+
+
+[[profiles]]
+id = "endfield"
+target = "Arknights: Endfield"
+type = "game"
+mode = "umu"
+transport = "wayland"
+graphics = "vulkan"          # native Vulkan, not DXVK
+command = '~/Games/hypergryph/drive_c/Program Files/Hypergryph Launcher/games/Arknights Endfield/Endfield.exe'
+match = 'Endfield.exe|PlatformProcess.exe'
+launch = "parent-spoof"      # Endfield checks that its direct parent is Games.exe
+dependencies = ["hypergryph-launcher"]
+
+# The parent is resolved from the launcher profile's `games_exe`.
+# An explicit override is also allowed:
+# parent = '~/Games/.../1.6.0/Games.exe'
+#
+# Path to the helper built from tools/endfield-parent-spoof.c.
+# Relative paths are resolved next to this config file or the WCAS binary.
+helper = '../build/endfield-parent-spoof.exe'
+
+# Optional process/launch policy:
+# capture_backend = "dmabuf"
+# allow_activation = false
+# args = []
+# env = { WINEDEBUG = "-all" }

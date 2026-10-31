@@ -208,7 +208,7 @@ Health、Target、FrameBus 各自绑定 ABIX provider；`SessionContext` 提供 
 ### 依赖
 
 - 构建：CMake ≥ 3.20、Ninja、Python 3（构建期生成 wire 元数据）
-- 库：OpenCV（core/imgcodecs/imgproc）、Boost（filesystem/system/program_options）、fmt
+- 库：OpenCV（core/imgcodecs/imgproc）、Boost（filesystem/system/program_options）、fmt、toml++
 - 协议：libwayland（client + server）、xkbcommon、xcb + xcb-composite
 - XWayland 输入（可选）：X11 + Xtst（XTest）；缺失时 X11 输入 provider 保留但返回
   `feature_not_implemented`
@@ -291,7 +291,24 @@ QtWebEngine 启动器（例如鹰角启动器）在 Wine Wayland 下可能白屏
 ./proton-inject.sh "/path/to/Launcher.exe" --transport xwayland
 ```
 
-### 7.2 直接用 CLI
+### 7.2 TOML launch profiles
+
+`examples/wcas-profiles.toml` 定义了启动器、Arknights、Endfield 的 profile。示例：
+
+```sh
+./build/Release/proton-inject \
+  --config examples/wcas-profiles.toml \
+  --profile endfield --serve
+```
+
+`dependencies` 指向需要的启动器 profile；Endfield 的 `parent-spoof` 从该 profile 的
+`games_exe` 解析官方 `Games.exe`。parent-spoof helper 可用以下脚本交叉编译：
+
+```sh
+./scripts/build-endfield-parent-spoof.sh
+```
+
+### 7.3 直接用 CLI
 
 ```sh
 build/Release/proton-inject \
@@ -310,6 +327,9 @@ build/Release/proton-inject \
 | `--proton` / `--wine` / `--umu` | 启动方式                                                             |
 | `--graphics-api, -g`            | `dxvk`(默认) 或 `vulkan`(`vk`，游戏原生) 或 `opengl`(`gl`/`wined3d`) |
 | `--transport`                   | `auto`(默认) / `wayland`(native) / `xwayland`(x11)                  |
+| `--config FILE`                 | 读取 TOML launch profile                                            |
+| `--profile ID`                  | 配合 `--config` 选择 profile；缺省用 `default`                      |
+| `--list-profiles`               | 列出配置中的 profile 和依赖关系                                     |
 | `--capture-backend, -b`         | `client`(默认) / `shm` / `dmabuf` / `kms`                            |
 | `--bridge-width/-height, -x/-y` | XWayland 回退桥接分辨率                                              |
 | `--match-regex, -r`             | 额外的子窗口进程匹配正则（默认取目标程序父目录）                     |

@@ -269,9 +269,9 @@ endif()
 
 add_executable(wcas-example main.cpp)
 target_link_libraries(wcas-example PRIVATE WCAS::WCAS)
-add_executable(proton-inject proton-inject.cpp)
+add_executable(proton-inject proton-inject.cpp src/SKL/WCAS/Private/Harness/ProfileConfig.cpp)
 target_link_libraries(proton-inject PRIVATE WCAS::WCAS wcas-ipc wcas-sdm Boost::program_options
-                                             ${WCAS_CMDLY_TARGET})
+                                             ${WCAS_CMDLY_TARGET} tomlplusplus::tomlplusplus)
 add_executable(wcasctl tools/wcasctl.cpp)
 target_link_libraries(wcasctl PRIVATE wcas-ipc wcas-sdm)
 install(TARGETS wcasctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -289,6 +289,13 @@ if(BUILD_TESTING)
         target_compile_options(${target} PRIVATE -UNDEBUG)
         add_test(NAME ${target} COMMAND ${target})
     endfunction()
+
+    # ---- TOML launch profile parser ----
+    add_executable(wcas-profile-config tests/profile_config.cpp src/SKL/WCAS/Private/Harness/ProfileConfig.cpp)
+    target_link_libraries(wcas-profile-config PRIVATE tomlplusplus::tomlplusplus)
+    target_include_directories(wcas-profile-config PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_options(wcas-profile-config PRIVATE -UNDEBUG)
+    add_test(NAME wcas-profile-config COMMAND wcas-profile-config)
 
     # ---- 常规单元/接口测试 ----
     wcas_add_test(unit-tests tests/unit.cpp)

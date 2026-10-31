@@ -4,6 +4,7 @@
 #include "SKL/WCAS/Private/IPC/Protocol.h"
 #include "SKL/WCAS/Private/IPC/Server.h"
 #include "SKL/WCAS/Private/SDM/Channel.h"
+#include "SKL/WCAS/Private/Harness/ProfileConfig.h"
 
 #include <opencv2/imgcodecs.hpp>
 #include <boost/json.hpp>
@@ -102,6 +103,9 @@ struct Options {
     int bridge_height = 1'080;
     std::string output_dir = "/tmp/wcas-logs";
     std::string match_regex;
+    std::string config_path;
+    std::string profile_id;
+    bool list_profiles = false;
     DebugFlags debug;
     bool probe_dmabuf = false;
     optional<int> test_dmabuf_fd;
@@ -134,7 +138,8 @@ void print_usage() {
         "usage: proton-inject --program EXEC [--arg ARG] "
         "[--proton|--wine|--umu] [--cli] [--serve [--socket PATH] [--detach]] "
         "[--capture-backend B] [--graphics-api A] [--transport auto|wayland|xwayland] [--debug-all] "
-        "[--native-timeout SEC] [--output-dir DIR] [--test-dmabuf FD]");
+        "[--native-timeout SEC] [--output-dir DIR] [--test-dmabuf FD]\n"
+        "       proton-inject --config FILE [--profile ID] [--list-profiles] ...");
 }
 
 /// Parse a trailing hold duration such as `3s`, `500ms`, `1.5s`.
@@ -315,6 +320,9 @@ optional<int> parse_arguments(int argc, char **argv, Options &options) {
         ("capture-backend,b", po::value<std::string>(), "client (default), kms, shm, dmabuf")
         ("match-regex,r", po::value<std::string>(&options.match_regex),
             "extra regex for child-window processes (default: program dir)")
+        ("config", po::value<std::string>(&options.config_path), "TOML launch profile file")
+        ("profile", po::value<std::string>(&options.profile_id), "profile id from --config")
+        ("list-profiles", po::bool_switch(&options.list_profiles), "list profiles from --config and exit")
         ("debug-all", po::bool_switch(&options.debug.all), "enable all debug categories")
         ("debug-capture", po::bool_switch(&options.debug.capture), "enable capture debug logs")
         ("debug-dmabuf", po::bool_switch(&options.debug.dmabuf), "enable dmabuf debug logs")
@@ -402,6 +410,208 @@ LaunchConfig make_launch_config(const Options &options) {
     for (const auto &entry : options.environment)
         config.env(entry.first, entry.second);
     return config;
+}
+
+
+// ── launch profiles ─────────────────────────────────────────────────────────
+
+std::string home_directory() {
+    if (const char *home = std::getenv("HOME"); home != nullptr) return home;
+    return {};
+}
+
+std::string expand_home_value(const std::string &value) {
+    if (value == "~" || value.rfind("~/", 0) == 0) {
+        return (std::filesystem::path(home_directory()) / value.substr(value == "~" ? 1 : 2)).string();
+    }
+    if (value.rfind("$HOME/", 0) == 0) {
+        return (std::filesystem::path(home_directory()) / value.substr(6)).string();
+    }
+    return value;
+}
+
+std::string expand_profile_path(const std::string &value, const std::filesystem::path &base) {
+    if (value.empty()) return value;
+    std::filesystem::path path = expand_home_value(value);
+    if (path.is_relative()) path = base / path;
+    return path.lexically_normal().string();
+}
+
+std::vector<long long> version_parts(const std::string &name) {
+    std::vector<long long> result;
+    std::string current;
+    for (const char c : name) {
+        if (c == '.') {
+            if (current.empty()) return {};
+            try {
+                result.push_back(std::stoll(current));
+            } catch (...) {
+                return {};
+            }
+            current.clear();
+        } else if (std::isdigit(static_cast<unsigned char>(c))) {
+            current.push_back(c);
+        } else {
+            return {};
+        }
+    }
+    if (current.empty()) return {};
+    try {
+        result.push_back(std::stoll(current));
+    } catch (...) {
+        return {};
+    }
+    return result;
+}
+
+std::string latest_games_exe(const std::string &launcher_command) {
+    const auto root = std::filesystem::path(launcher_command).parent_path();
+    if (!std::filesystem::is_directory(root)) return {};
+    std::string best;
+    std::vector<long long> best_version;
+    for (const auto &entry : std::filesystem::directory_iterator(root)) {
+        if (!entry.is_directory()) continue;
+        const auto version = version_parts(entry.path().filename().string());
+        if (version.empty()) continue;
+        const auto candidate = entry.path() / "Games.exe";
+        if (!std::filesystem::is_regular_file(candidate)) continue;
+        if (best.empty()
+            || std::lexicographical_compare(best_version.begin(), best_version.end(), version.begin(), version.end())) {
+            best = candidate.string();
+            best_version = version;
+        }
+    }
+    return best;
+}
+
+const LaunchProfile *launcher_dependency(const ProfileConfig &config, const LaunchProfile &profile) {
+    for (const auto &dependency : profile.dependencies) {
+        const auto *candidate = find_profile(config, dependency);
+        if (candidate != nullptr && candidate->type == "launcher") return candidate;
+    }
+    return nullptr;
+}
+
+std::string windows_path(const std::string &host_path) {
+    if (host_path.size() >= 2 && host_path[1] == ':') return host_path;
+    std::string result = "Z:";
+    for (const char c : host_path)
+        result.push_back(c == '/' ? '\\' : c);
+    return result;
+}
+
+bool apply_profile(Options &options, const ProfileConfig &config, const LaunchProfile &profile,
+    const std::string &config_path, std::string &error) {
+    const auto base = std::filesystem::path(config_path).parent_path();
+    const std::string command = expand_profile_path(profile.command, base);
+    if (command.empty()) {
+        error = "profile '" + profile.id + "' has an empty command";
+        return false;
+    }
+
+    std::string mode = profile.mode;
+    if (mode.empty()) {
+        const auto description = profile.description;
+        if (description.find("proton") != std::string::npos || description.find("Proton") != std::string::npos)
+            mode = "umu";
+        else if (description.find("wine") != std::string::npos || description.find("Wine") != std::string::npos)
+            mode = "wine";
+        else if (description.find("native") != std::string::npos || description.find("Native") != std::string::npos)
+            mode = "native";
+    }
+    if (mode.empty()) mode = std::filesystem::path(command).extension() == ".exe" ? "umu" : "native";
+    options.mode = mode;
+    options.program = command;
+    options.args = profile.args;
+    options.match_regex = profile.match;
+    options.allow_activation = profile.allow_activation;
+    options.environment.clear();
+    for (const auto &entry : config.global_env) {
+        options.environment.emplace_back(entry.key, expand_home_value(entry.value.value_or("")));
+    }
+    for (const auto &entry : profile.env) {
+        const auto value = expand_home_value(entry.value.value_or(""));
+        const auto existing = std::find_if(options.environment.begin(), options.environment.end(),
+            [&](const auto &item) { return item.first == entry.key; });
+        if (existing != options.environment.end())
+            existing->second = value;
+        else
+            options.environment.emplace_back(entry.key, value);
+    }
+
+    if (!profile.transport.empty()) {
+        const auto transport = parse_transport(profile.transport);
+        if (!transport) {
+            error = "profile '" + profile.id + "' has invalid transport: " + profile.transport;
+            return false;
+        }
+        options.transport = *transport;
+    }
+    if (!profile.graphics.empty() && profile.graphics != "auto") {
+        const auto graphics = parse_graphics_api(profile.graphics);
+        if (!graphics) {
+            error = "profile '" + profile.id + "' has invalid graphics: " + profile.graphics;
+            return false;
+        }
+        options.graphics_api = *graphics;
+    }
+    if (!profile.capture_backend.empty()) {
+        const auto backend = parse_backend(profile.capture_backend);
+        if (!backend) {
+            error = "profile '" + profile.id + "' has invalid capture_backend: " + profile.capture_backend;
+            return false;
+        }
+        options.capture_backend = *backend;
+    }
+
+    if (profile.launch == "parent-spoof") {
+        std::string parent = profile.parent;
+        if (parent.empty()) {
+            const auto *launcher = launcher_dependency(config, profile);
+            if (launcher == nullptr) {
+                error = "profile '" + profile.id + "' uses parent-spoof but has no launcher dependency";
+                return false;
+            }
+            const auto launcher_command = expand_profile_path(launcher->command, base);
+            parent = launcher->games_exe;
+            if (parent.empty() || parent == "auto")
+                parent = latest_games_exe(launcher_command);
+            else
+                parent = expand_profile_path(parent, base);
+        } else {
+            parent = expand_profile_path(parent, base);
+        }
+        if (parent.empty()) {
+            error = "profile '" + profile.id + "' could not resolve Games.exe from its launcher dependency";
+            return false;
+        }
+        if (!std::filesystem::is_regular_file(parent)) {
+            error = "profile '" + profile.id + "' parent does not exist: " + parent;
+            return false;
+        }
+
+        std::string helper = profile.helper;
+        if (helper.empty()) {
+            if (const char *env_helper = std::getenv("WCAS_ENDFIELD_HELPER"); env_helper != nullptr)
+                helper = env_helper;
+        }
+        if (helper.empty()) helper = "endfield-parent-spoof.exe";
+        helper = expand_profile_path(helper, base);
+        if (!std::filesystem::is_regular_file(helper)) {
+            error = "profile '" + profile.id + "' parent-spoof helper does not exist: " + helper;
+            return false;
+        }
+
+        options.program = helper;
+        options.args.clear();
+        options.args.push_back(windows_path(parent));
+        options.args.push_back(windows_path(command));
+        for (const auto &arg : profile.args)
+            options.args.push_back(arg);
+        if (options.match_regex.empty()) options.match_regex = std::filesystem::path(command).filename().string();
+        options.mode = "umu";
+    }
+    return true;
 }
 
 optional<Session> launch_session(const Options &options) {
@@ -1535,6 +1745,46 @@ int main(int argc, char **argv) {
 
     Options options;
     if (const auto exit_code = parse_arguments(argc, argv, options)) return *exit_code;
+
+    std::optional<ProfileConfig> profile_config;
+    if (!options.config_path.empty() || !options.profile_id.empty() || options.list_profiles) {
+        if (options.config_path.empty()) {
+            fmt::println(stderr, "error: --profile/--list-profiles requires --config FILE");
+            return 2;
+        }
+        const auto config_path = expand_profile_path(options.config_path, std::filesystem::current_path());
+        std::string config_error;
+        profile_config = load_profile_config(config_path, config_error);
+        if (!profile_config) {
+            fmt::println(stderr, "error: {}", config_error);
+            return 2;
+        }
+        if (options.list_profiles) {
+            for (const auto &profile : profile_config->profiles) {
+                fmt::print("{}\t{}\t{}", profile.id, profile.type, profile.target);
+                if (!profile.dependencies.empty()) {
+                    fmt::print("\tdepends=");
+                    for (std::size_t i = 0; i < profile.dependencies.size(); ++i) {
+                        if (i != 0) fmt::print(",");
+                        fmt::print("{}", profile.dependencies[i]);
+                    }
+                }
+                fmt::println("");
+            }
+            return 0;
+        }
+        const auto &profile_id = options.profile_id.empty() ? profile_config->default_profile : options.profile_id;
+        const auto *profile = find_profile(*profile_config, profile_id);
+        if (profile == nullptr) {
+            fmt::println(stderr, "error: profile not found: {}", profile_id);
+            return 2;
+        }
+        std::string profile_error;
+        if (!apply_profile(options, *profile_config, *profile, config_path, profile_error)) {
+            fmt::println(stderr, "error: {}", profile_error);
+            return 2;
+        }
+    }
 
     // --test-dmabuf <FD>: probe a specific DMA-BUF fd and exit.
     if (options.test_dmabuf_fd) {
