@@ -92,6 +92,7 @@ struct Options {
     std::vector<std::string> args;
     std::vector<std::pair<std::string, std::string>> environment;
     GraphicsApi graphics_api = GraphicsApi::dxvk;
+    LaunchTransport transport = LaunchTransport::Auto;
     CaptureKind capture_backend = CaptureKind::client_buffer;
     int native_timeout = 8;
     int fallback_timeout = 30;
@@ -121,11 +122,18 @@ optional<GraphicsApi> parse_graphics_api(const std::string &value) {
     return std::nullopt;
 }
 
+optional<LaunchTransport> parse_transport(const std::string &value) {
+    if (value == "auto") return LaunchTransport::Auto;
+    if (value == "wayland" || value == "native") return LaunchTransport::NativeWayland;
+    if (value == "xwayland" || value == "x11") return LaunchTransport::XWayland;
+    return std::nullopt;
+}
+
 void print_usage() {
     fmt::println(
         "usage: proton-inject --program EXEC [--arg ARG] "
         "[--proton|--wine|--umu] [--cli] [--serve [--socket PATH] [--detach]] "
-        "[--capture-backend B] [--debug-all] "
+        "[--capture-backend B] [--graphics-api A] [--transport auto|wayland|xwayland] [--debug-all] "
         "[--native-timeout SEC] [--output-dir DIR] [--test-dmabuf FD]");
 }
 
@@ -192,6 +200,18 @@ optional<int> resolve_graphics_api(const boost::program_options::variables_map &
         return 2;
     }
     options.graphics_api = *parsed;
+    return std::nullopt;
+}
+
+optional<int> resolve_transport(const boost::program_options::variables_map &vm, Options &options) {
+    if (vm.count("transport") == 0) return std::nullopt;
+    const auto value = vm["transport"].as<std::string>();
+    const auto parsed = parse_transport(value);
+    if (!parsed) {
+        fmt::println(stderr, "error: 未知传输模式: {}，可选值: auto, wayland (native), xwayland (x11)", value);
+        return 2;
+    }
+    options.transport = *parsed;
     return std::nullopt;
 }
 
@@ -291,6 +311,7 @@ optional<int> parse_arguments(int argc, char **argv, Options &options) {
         ("bridge-height,y", po::value<int>(&options.bridge_height)->default_value(options.bridge_height),
             "bridge height")
         ("graphics-api,g", po::value<std::string>(), "dxvk (default), vulkan (vk, native), opengl (gl/wined3d)")
+        ("transport", po::value<std::string>(), "auto (default), wayland (native), xwayland (x11)")
         ("capture-backend,b", po::value<std::string>(), "client (default), kms, shm, dmabuf")
         ("match-regex,r", po::value<std::string>(&options.match_regex),
             "extra regex for child-window processes (default: program dir)")
@@ -337,6 +358,7 @@ optional<int> parse_arguments(int argc, char **argv, Options &options) {
     }
 
     if (const auto exit_code = resolve_graphics_api(vm, options)) return exit_code;
+    if (const auto exit_code = resolve_transport(vm, options)) return exit_code;
     if (const auto exit_code = resolve_capture_backend(vm, options)) return exit_code;
     if (const auto exit_code = resolve_environment(env_entries, options)) return exit_code;
 
@@ -373,6 +395,7 @@ LaunchConfig make_launch_config(const Options &options) {
     for (const auto &arg : options.args)
         config.arg(arg);
     config.graphics_api(options.graphics_api);
+    config.transport(options.transport);
     config.gpu_accelerated(options.gpu_accelerated);
     config.inherit_diagnostics(options.inherit_output);
     if (!options.match_regex.empty()) config.match_regex(options.match_regex);

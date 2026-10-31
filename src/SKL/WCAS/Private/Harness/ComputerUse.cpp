@@ -151,6 +151,10 @@ LaunchConfig &LaunchConfig::graphics_api(GraphicsApi v) noexcept {
     graphics_api_ = v;
     return *this;
 }
+LaunchConfig &LaunchConfig::transport(LaunchTransport v) noexcept {
+    transport_ = v;
+    return *this;
+}
 LaunchConfig &LaunchConfig::match_regex(std::string value) {
     match_regex_ = std::move(value);
     return *this;
@@ -409,6 +413,8 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
     skl::epcd::ErrorCode last_error = code(errc::native_wayland_timeout);
     for (const auto &strategy : launch_strategies()) {
         if (!strategy.available()) continue;
+        if (config.transport_ == LaunchTransport::XWayland && strategy.kind() == LaunchKind::NativeWayland) continue;
+        if (config.transport_ == LaunchTransport::NativeWayland && strategy.kind() == LaunchKind::XWayland) continue;
         switch (strategy.kind()) {
             case LaunchKind::NativeWayland: {
                 auto native = attempt(false, "", "", nullptr);

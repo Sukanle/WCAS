@@ -54,6 +54,7 @@
 #   --bridge-height H      XWayland 桥高度（默认 800）
 #   --no-gpu               禁用 GPU 加速
 #   --graphics-api API     图形 API 后端: dxvk (默认) | vulkan (原生) | opengl
+#   --transport MODE       启动通道: auto (默认) | wayland (native) | xwayland (x11)
 #   --capture-backend BE   截图后端: dmabuf (默认), client, kms, shm
 #   --output-dir DIR       日志输出目录（默认 /tmp/agent-seat-logs）
 #   --inherit-output       继承游戏 stdout/stderr（调试用）
@@ -70,6 +71,7 @@
 #   BRIDGE_HEIGHT         XWayland 桥高度
 #   GPU_ACCELERATED       设为 "0" 强制软件渲染
 #   GRAPHICS_API          图形 API 后端: dxvk (默认) | vulkan (原生) | opengl
+#   TRANSPORT             启动通道: auto (默认) | wayland (native) | xwayland (x11)
 #   CAPTURE_BACKEND       截图后端: dmabuf (默认), client, kms, shm
 #   LOG_DIR               日志输出目录
 #   WCAS_TEST_BINARY      覆盖自动探测的 proton-inject 路径（开发/测试用）
@@ -126,6 +128,7 @@ BRIDGE_WIDTH="${BRIDGE_WIDTH:-1280}"
 BRIDGE_HEIGHT="${BRIDGE_HEIGHT:-720}"
 GPU_ACCELERATED="${GPU_ACCELERATED:-1}"
 GRAPHICS_API="${GRAPHICS_API:-dxvk}"
+TRANSPORT="${TRANSPORT:-auto}"
 CAPTURE_BACKEND="${CAPTURE_BACKEND:-dmabuf}"
 OUTPUT_DIR="${LOG_DIR}"
 INHERIT_OUTPUT=false
@@ -276,6 +279,23 @@ while [[ $# -gt 0 ]]; do
                 shift 2
             else
                 log "[ERROR] --graphics-api 需要参数"
+                exit 1
+            fi
+            ;;
+        --transport)
+            if [[ -n "${2:-}" ]]; then
+                case "${2}" in
+                    auto) TRANSPORT="auto" ;;
+                    wayland|native) TRANSPORT="wayland" ;;
+                    xwayland|x11) TRANSPORT="xwayland" ;;
+                    *)
+                        log "[ERROR] 未知传输模式: ${2}，可选值: auto, wayland (native), xwayland (x11)"
+                        exit 1
+                        ;;
+                esac
+                shift 2
+            else
+                log "[ERROR] --transport 需要参数"
                 exit 1
             fi
             ;;
@@ -678,6 +698,9 @@ build_test_command() {
         cmd+=("--graphics-api" "${GRAPHICS_API}")
     fi
 
+    # 启动通道
+    cmd+=("--transport" "${TRANSPORT}")
+
     # 截图后端（适用于所有模式）
     cmd+=("--capture-backend" "${CAPTURE_BACKEND}")
 
@@ -738,6 +761,7 @@ log "超时: NativeWayland=${NATIVE_TIMEOUT}s, XWayland=${FALLBACK_TIMEOUT}s, �
 log "桥尺寸: ${BRIDGE_WIDTH}x${BRIDGE_HEIGHT}"
 log "GPU 加速: $(if [[ "${GPU_ACCELERATED}" != "0" ]]; then echo 启用; else echo 禁用; fi)"
 log "图形 API: ${GRAPHICS_API} $(case "${GRAPHICS_API}" in dxvk) echo '(DXVK/VKD3D)';; vulkan) echo '(游戏原生 Vulkan)';; opengl) echo '(WineD3D)';; esac)"
+log "启动通道: ${TRANSPORT}"
 log "截图后端: ${CAPTURE_BACKEND} $(case "${CAPTURE_BACKEND}" in client) echo '(客户端缓冲区缓存)';; kms) echo '(DRM/KMS 内核帧缓冲区)';; shm) echo '(wl_shm 共享内存)';; dmabuf) echo '(DMA-BUF GPU 缓冲区)';; esac)"
 # if ${DEBUG_MODE}; then log "调试模式: 启用 (${DEBUG_MODE})"; fi
 if [[ "${DEBUG_MODE}" == "all" ]]; then
