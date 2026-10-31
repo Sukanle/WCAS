@@ -8,7 +8,7 @@
  *
  * Build from Linux with:
  *   zig cc -target x86_64-windows-gnu -O2 -municode \
- *     -o endfield-parent-spoof.exe tools/endfield-parent-spoof.c
+ *     -o endfield-parent-spoof.exe tools/endfield-parent-spoof.cpp
  *
  * This is a compatibility helper, not a general-purpose launcher. It requires
  * the official launcher installation and may be rejected by anti-cheat.
