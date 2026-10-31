@@ -15,6 +15,7 @@
  */
 
 #include <windows.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <wchar.h>
@@ -54,9 +55,20 @@ static void directory_of(const wchar_t *path, wchar_t *output, size_t capacity) 
     }
 }
 
-int wmain(int argc, wchar_t **argv) {
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, int show) {
+    (void)instance;
+    (void)previous;
+    (void)command_line;
+    (void)show;
+
+    int argc = 0;
+    wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv == NULL) {
+        return 2;
+    }
     if (argc < 3) {
         fwprintf(stderr, L"usage: %ls <Games.exe> <Endfield.exe> [args...]\n", argv[0]);
+        LocalFree(argv);
         return 2;
     }
 
@@ -89,6 +101,7 @@ int wmain(int argc, wchar_t **argv) {
     if (!CreateProcessW(parent_path, parent_command, NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW, NULL,
             parent_directory, &parent_startup, &parent_process)) {
         fail("CreateProcessW(Games.exe)");
+        LocalFree(argv);
         return 4;
     }
     fwprintf(stderr, L"parent created pid=%lu, suspended\n", (unsigned long)parent_process.dwProcessId);
@@ -101,6 +114,7 @@ int wmain(int argc, wchar_t **argv) {
         fail("InitializeProcThreadAttributeList(size)");
         TerminateProcess(parent_process.hProcess, 0);
         CloseHandle(parent_process.hProcess);
+        LocalFree(argv);
         return 4;
     }
 
@@ -109,6 +123,7 @@ int wmain(int argc, wchar_t **argv) {
         fwprintf(stderr, L"malloc failed\n");
         TerminateProcess(parent_process.hProcess, 0);
         CloseHandle(parent_process.hProcess);
+        LocalFree(argv);
         return 4;
     }
     if (!InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_size)) {
@@ -116,6 +131,7 @@ int wmain(int argc, wchar_t **argv) {
         free(attributes);
         TerminateProcess(parent_process.hProcess, 0);
         CloseHandle(parent_process.hProcess);
+        LocalFree(argv);
         return 4;
     }
     if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS, &parent_process.hProcess,
@@ -125,6 +141,7 @@ int wmain(int argc, wchar_t **argv) {
         free(attributes);
         TerminateProcess(parent_process.hProcess, 0);
         CloseHandle(parent_process.hProcess);
+        LocalFree(argv);
         return 4;
     }
 
@@ -149,6 +166,7 @@ int wmain(int argc, wchar_t **argv) {
         TerminateProcess(parent_process.hProcess, 0);
         WaitForSingleObject(parent_process.hProcess, 5'000);
         CloseHandle(parent_process.hProcess);
+        LocalFree(argv);
         return 4;
     }
 
@@ -167,5 +185,6 @@ int wmain(int argc, wchar_t **argv) {
     WaitForSingleObject(parent_process.hProcess, 5'000);
     CloseHandle(game_process.hProcess);
     CloseHandle(parent_process.hProcess);
+    LocalFree(argv);
     return (int)exit_code;
 }
