@@ -1,0 +1,9 @@
+# Explicitly load the CMake compilation database. A rule that declares a
+# command source (default_command) disables clice's automatic discovery.
+[[rules]]
+compile_commands = ["build"]
+
+# Standalone Windows helper, built manually with Zig instead of CMake.
+[[rules]]
+patterns = ["tools/wcas-launch-helper.cpp"]
+default_command = "zig c++ -target x86_64-windows-gnu -std=c++20"
