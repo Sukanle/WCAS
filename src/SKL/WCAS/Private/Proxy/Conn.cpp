@@ -469,6 +469,8 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
             state.pointer_obj = word(msg.data() + 8);
         else if (opcode == 1 && words >= 1)
             state.keyboard_obj = word(msg.data() + 8);
+        else if (opcode == 2 && words >= 1)
+            state.touch_obj = word(msg.data() + 8);
     }
     if (app_to_upstream && role == "zwp_text_input_manager_v3" && opcode == 1 && words >= 1)
         state.text_input_obj = word(msg.data() + 8);

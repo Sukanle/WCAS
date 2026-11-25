@@ -41,6 +41,17 @@ bool inject_pointer_motion(const std::shared_ptr<ConnState> &state, double sx, d
 /// relative pointer object (the caller then relies on absolute motion alone).
 bool inject_relative_motion(const std::shared_ptr<ConnState> &state, double dx, double dy);
 
+/// Whether the client bound zwp_relative_pointer_v1 for its pointer.
+bool has_relative_pointer(const std::shared_ptr<ConnState> &state);
+
+/// Send wl_touch.down/motion/up events to the app's touch object.
+bool inject_touch_down(
+    const std::shared_ptr<ConnState> &state, uint32_t surface_id, int32_t contact, double x, double y);
+bool inject_touch_motion(const std::shared_ptr<ConnState> &state, int32_t contact, double x, double y);
+bool inject_touch_up(const std::shared_ptr<ConnState> &state, int32_t contact);
+bool inject_touch_frame(const std::shared_ptr<ConnState> &state);
+bool has_touch(const std::shared_ptr<ConnState> &state);
+
 /// Send wl_pointer.button event to the app (pressed=true for press, false for release).
 bool inject_pointer_button(const std::shared_ptr<ConnState> &state, uint32_t button, bool pressed);
 

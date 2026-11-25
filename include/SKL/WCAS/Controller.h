@@ -102,6 +102,9 @@ public:
 
     [[nodiscard]] bool valid() const noexcept;
     [[nodiscard]] bool has_pointer() const noexcept;
+    /// Whether relative_move can use a native relative-pointer object.
+    /// X11 returns true because XTest handles relative motion itself.
+    [[nodiscard]] bool has_relative_pointer() const noexcept;
     [[nodiscard]] bool has_keyboard() const noexcept;
     [[nodiscard]] bool has_gamepad() const noexcept;
 
@@ -129,6 +132,13 @@ public:
     [[nodiscard]] result<void> pointer_down(cv::Point2d pos, PointerButton button = PointerButton::left) const;
     /// Release `button` previously pressed by `pointer_down`.
     [[nodiscard]] result<void> pointer_up(PointerButton button = PointerButton::left) const;
+
+    /// Touch contact input. `contact` is the touch id; devices without wl_touch
+    /// return feature_not_implemented.
+    [[nodiscard]] result<void> touch_down(int32_t contact, cv::Point2d pos) const;
+    [[nodiscard]] result<void> touch_move(int32_t contact, cv::Point2d pos) const;
+    [[nodiscard]] result<void> touch_up(int32_t contact) const;
+    [[nodiscard]] bool has_touch() const noexcept;
 
     // KeyboardController
     [[nodiscard]] result<void> key(std::string combination, std::chrono::milliseconds hold) const;

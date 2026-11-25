@@ -960,7 +960,11 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         for (const char *capability : {"capture", "input", "pointer", "keyboard", "windows", "stop", "sdm", "frames"}) {
             capabilities.emplace_back(capability);
         }
+        if (controller_.has_relative_pointer()) capabilities.emplace_back("relative_pointer");
+        if (controller_.has_touch()) capabilities.emplace_back("touch");
         result["capabilities"] = std::move(capabilities);
+        result["relative_pointer"] = controller_.has_relative_pointer();
+        result["touch"] = controller_.has_touch();
         refresh_frame_size();
         if (frame_.width > 0 && frame_.height > 0) {
             result["frame"] = object{
@@ -984,6 +988,8 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         result["frames"] = session_.app.presented_frames();
         result["windows"] = static_cast<std::uint64_t>(windows.size());
         result["socket"] = ipc_path_;
+        result["relative_pointer"] = controller_.has_relative_pointer();
+        result["touch"] = controller_.has_touch();
         if (frame_.width > 0 && frame_.height > 0) {
             result["frame"] = object{
                 { "width",  frame_.width},
@@ -1092,7 +1098,29 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
     if (method == "pointer.relative") {
         const double dx = number("dx", 0.0);
         const double dy = number("dy", 0.0);
+        const bool native_relative = controller_.has_relative_pointer();
         auto result = controller_.relative_move({dx, dy});
+        if (!result) return fail(-32'003, error_message(result.error()));
+        object metadata;
+        metadata["mode"] = session_.app.transport() == Transport::xwayland
+                             ? "x11"
+                             : (native_relative ? "relative" : "absolute_fallback");
+        metadata["relative_pointer"] = native_relative;
+        return ok(std::move(metadata));
+    }
+
+    if (method == "touch.down" || method == "touch.move" || method == "touch.up") {
+        refresh_frame_size();
+        const int contact = static_cast<int>(number("contact", 0.0));
+        if (method == "touch.up") {
+            auto result = controller_.touch_up(contact);
+            if (!result) return fail(-32'003, error_message(result.error()));
+            return ok();
+        }
+        const double x = clamp_axis(number("x", frame_.width / 2.0), frame_.width);
+        const double y = clamp_axis(number("y", frame_.height / 2.0), frame_.height);
+        auto result =
+            method == "touch.down" ? controller_.touch_down(contact, {x, y}) : controller_.touch_move(contact, {x, y});
         if (!result) return fail(-32'003, error_message(result.error()));
         return ok();
     }

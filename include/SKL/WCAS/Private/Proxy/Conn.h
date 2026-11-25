@@ -257,6 +257,7 @@ struct ConnState {
     // Input tracking
     uint32_t pointer_obj = 0;       // App-side wl_pointer object ID
     uint32_t keyboard_obj = 0;      // App-side wl_keyboard object ID
+    uint32_t touch_obj = 0;         // App-side wl_touch object ID
     uint32_t focused_surface = 0;   // Last pointer-entered surface (app ID space)
     uint32_t pointer_focus = 0;     // Surface with injected pointer focus
     uint32_t keyboard_focus = 0;    // Surface with injected keyboard focus

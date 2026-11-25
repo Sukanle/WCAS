@@ -228,6 +228,9 @@ int main(int argc, char **argv) {
         ("down", po::value<std::string>()->value_name("X Y [BUTTON]"),
             "press a pointer button (left|right|middle)")
         ("up", po::value<std::string>()->value_name("[BUTTON]"), "release a pointer button")
+        ("touch-down", po::value<std::string>()->value_name("X Y [CONTACT]"), "touch contact down")
+        ("touch-move", po::value<std::string>()->value_name("X Y [CONTACT]"), "touch contact move")
+        ("touch-up", po::value<std::string>()->value_name("[CONTACT]"), "touch contact up")
         ("drag", po::value<std::string>()->value_name("X1 Y1 X2 Y2 [HOLD_MS]"),
             "press, move and release at frame coordinates")
         ("scroll", po::value<std::string>()->value_name("X Y DX DY"), "scroll at frame coordinates")
@@ -366,6 +369,16 @@ int main(int argc, char **argv) {
         params["to_y"] = std::stod(arguments[3]);
         if (arguments.size() >= 5) params["hold_ms"] = std::stod(arguments[4]);
         has_params = true;
+    } else if ((command == "touch-down" || command == "touch-move") && arguments.size() >= 2) {
+        rpc_method = "touch." + command.substr(6);
+        params["x"] = std::stod(arguments[0]);
+        params["y"] = std::stod(arguments[1]);
+        if (arguments.size() >= 3) params["contact"] = std::stoi(arguments[2]);
+        has_params = true;
+    } else if (command == "touch-up") {
+        rpc_method = "touch.up";
+        if (!arguments.empty()) params["contact"] = std::stoi(arguments[0]);
+        has_params = true;
     } else if (command == "scroll" && arguments.size() >= 4) {
         rpc_method = "pointer.scroll";
         params["x"] = std::stod(arguments[0]);
@@ -398,7 +411,10 @@ int main(int argc, char **argv) {
                && command != "drag"
                && command != "key-down"
                && command != "key-up"
-               && command != "relative") {
+               && command != "relative"
+               && command != "touch-down"
+               && command != "touch-move"
+               && command != "touch-up") {
         fmt::println(stderr, "unknown or incomplete command: {}", command);
         usage(commands, options);
         return 2;

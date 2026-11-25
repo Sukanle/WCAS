@@ -183,6 +183,16 @@ bool inject_pointer_motion(const std::shared_ptr<ConnState> &state, double sx, d
     return send_message(state->client_fd, msg);
 }
 
+bool has_relative_pointer(const std::shared_ptr<ConnState> &state) {
+    if (!state) return false;
+    std::lock_guard lock(state->data_mutex);
+    for (const auto &[object, role] : state->object_role_enum) {
+        (void)object;
+        if (role == Role::RelativePointer) return true;
+    }
+    return false;
+}
+
 bool inject_relative_motion(const std::shared_ptr<ConnState> &state, double dx, double dy) {
     if (!state) return false;
     std::lock_guard lock(state->data_mutex);
@@ -206,6 +216,58 @@ bool inject_relative_motion(const std::shared_ptr<ConnState> &state, double dx, 
     msg[5] = wl_fixed(dy);
     msg[6] = wl_fixed(dx);
     msg[7] = wl_fixed(dy);
+    return send_message(state->client_fd, msg);
+}
+
+bool has_touch(const std::shared_ptr<ConnState> &state) {
+    if (!state) return false;
+    std::lock_guard lock(state->data_mutex);
+    return state->touch_obj != 0;
+}
+
+bool inject_touch_down(
+    const std::shared_ptr<ConnState> &state, uint32_t surface_id, int32_t contact, double x, double y) {
+    if (!state || !state->touch_obj || !surface_id) return false;
+    std::lock_guard lock(state->data_mutex);
+    std::vector<uint32_t> msg(8);
+    wl_header(msg, state->touch_obj, 0);   // wl_touch.down
+    msg[2] = next_serial(state);
+    msg[3] = input_timestamp_ms();
+    msg[4] = surface_id;
+    msg[5] = static_cast<uint32_t>(contact);
+    msg[6] = wl_fixed(x);
+    msg[7] = wl_fixed(y);
+    return send_message(state->client_fd, msg);
+}
+
+bool inject_touch_motion(const std::shared_ptr<ConnState> &state, int32_t contact, double x, double y) {
+    if (!state || !state->touch_obj) return false;
+    std::lock_guard lock(state->data_mutex);
+    std::vector<uint32_t> msg(6);
+    wl_header(msg, state->touch_obj, 2);   // wl_touch.motion
+    msg[2] = input_timestamp_ms();
+    msg[3] = static_cast<uint32_t>(contact);
+    msg[4] = wl_fixed(x);
+    msg[5] = wl_fixed(y);
+    return send_message(state->client_fd, msg);
+}
+
+bool inject_touch_up(const std::shared_ptr<ConnState> &state, int32_t contact) {
+    if (!state || !state->touch_obj) return false;
+    std::lock_guard lock(state->data_mutex);
+    std::vector<uint32_t> msg(5);
+    wl_header(msg, state->touch_obj, 1);   // wl_touch.up
+    msg[2] = next_serial(state);
+    msg[3] = input_timestamp_ms();
+    msg[4] = static_cast<uint32_t>(contact);
+    return send_message(state->client_fd, msg);
+}
+
+bool inject_touch_frame(const std::shared_ptr<ConnState> &state) {
+    if (!state || !state->touch_obj) return false;
+    std::lock_guard lock(state->data_mutex);
+    std::vector<uint32_t> msg(2);
+    wl_header(msg, state->touch_obj, 3);   // wl_touch.frame
     return send_message(state->client_fd, msg);
 }
 

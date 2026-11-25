@@ -75,9 +75,14 @@ public:
     [[nodiscard]] result<void> abs_drag(cv::Point2d from, cv::Point2d to) const;
     [[nodiscard]] result<void> rel_drag(cv::Point2d from, cv::Point2d to) const;
     [[nodiscard]] result<void> relative_move(cv::Point2d delta) const;
+    [[nodiscard]] bool has_relative_pointer() const;
     [[nodiscard]] result<void> press_drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const;
     [[nodiscard]] result<void> pointer_down(cv::Point2d pos, PointerButton button) const;
     [[nodiscard]] result<void> pointer_up(PointerButton button) const;
+    [[nodiscard]] result<void> touch_down(int32_t contact, cv::Point2d pos) const;
+    [[nodiscard]] result<void> touch_move(int32_t contact, cv::Point2d pos) const;
+    [[nodiscard]] result<void> touch_up(int32_t contact) const;
+    [[nodiscard]] bool has_touch() const;
 
     // KeyboardController
     [[nodiscard]] result<void> key(std::string combination, std::chrono::milliseconds hold) const;
@@ -210,6 +215,42 @@ result<void> KeyboardMouseDevice::pointer_down(cv::Point2d pos, PointerButton bu
     if (!proxy::inject_pointer_frame(state)) return code(errc::input_injection_failed);
     return boost::outcome_v2::success();
 }
+
+result<void> KeyboardMouseDevice::touch_down(int32_t contact, cv::Point2d pos) const {
+    if (!ensure_session()) return code(errc::input_injection_failed);
+    auto state = session();
+    if (!state || !proxy::has_touch(state)) return code(errc::feature_not_implemented);
+    const auto target = input_target(state);
+    if (!target) return code(errc::input_injection_failed);
+    const double lx = to_logical(state, target, pos.x);
+    const double ly = to_logical(state, target, pos.y);
+    if (!proxy::inject_touch_down(state, target, contact, lx, ly)) return code(errc::input_injection_failed);
+    if (!proxy::inject_touch_frame(state)) return code(errc::input_injection_failed);
+    return boost::outcome_v2::success();
+}
+
+result<void> KeyboardMouseDevice::touch_move(int32_t contact, cv::Point2d pos) const {
+    if (!ensure_session()) return code(errc::input_injection_failed);
+    auto state = session();
+    if (!state || !proxy::has_touch(state)) return code(errc::feature_not_implemented);
+    const auto target = input_target(state);
+    if (!target) return code(errc::input_injection_failed);
+    if (!proxy::inject_touch_motion(state, contact, to_logical(state, target, pos.x), to_logical(state, target, pos.y)))
+        return code(errc::input_injection_failed);
+    if (!proxy::inject_touch_frame(state)) return code(errc::input_injection_failed);
+    return boost::outcome_v2::success();
+}
+
+result<void> KeyboardMouseDevice::touch_up(int32_t contact) const {
+    if (!ensure_session()) return code(errc::input_injection_failed);
+    auto state = session();
+    if (!state || !proxy::has_touch(state)) return code(errc::feature_not_implemented);
+    if (!proxy::inject_touch_up(state, contact)) return code(errc::input_injection_failed);
+    if (!proxy::inject_touch_frame(state)) return code(errc::input_injection_failed);
+    return boost::outcome_v2::success();
+}
+
+bool KeyboardMouseDevice::has_touch() const { return proxy::has_touch(session()); }
 
 result<void> KeyboardMouseDevice::pointer_up(PointerButton button) const {
     if (!ensure_session()) return code(errc::input_injection_failed);
@@ -422,15 +463,25 @@ result<void> KeyboardMouseDevice::abs_drag(cv::Point2d from, cv::Point2d to) con
     return drag(from, to, std::chrono::milliseconds{0});
 }
 
+bool KeyboardMouseDevice::has_relative_pointer() const { return proxy::has_relative_pointer(session()); }
+
 result<void> KeyboardMouseDevice::relative_move(cv::Point2d delta) const {
     if (!ensure_session()) return code(errc::input_injection_failed);
     auto state = session();
     if (!state) return code(errc::input_injection_failed);
 
+    const auto target = input_target(state);
+    if (!target) return code(errc::input_injection_failed);
+    const double scale = proxy::input_scale(state, target);
+    const cv::Point2d logical_delta{scale > 0.0 ? delta.x / scale : delta.x, scale > 0.0 ? delta.y / scale : delta.y};
+    const double lx = to_logical(state, target, last_position_.x);
+    const double ly = to_logical(state, target, last_position_.y);
+    (void)proxy::ensure_pointer_focus(state, target, lx, ly);
+
     // Pointer-locked wayland clients get the raw protocol delta. Clients that
     // do not bind zwp_relative_pointer_v1 fall back to an absolute move from
     // the last known position, which is still useful for normal desktop apps.
-    if (proxy::inject_relative_motion(state, delta.x, delta.y)) return boost::outcome_v2::success();
+    if (proxy::inject_relative_motion(state, logical_delta.x, logical_delta.y)) return boost::outcome_v2::success();
     return move(last_position_ + delta);
 }
 
@@ -658,6 +709,12 @@ result<void> Controller::relative_move(cv::Point2d delta) const {
     return _impl->x11 ? _impl->x11_device.relative_move(delta) : _impl->device.relative_move(delta);
 }
 
+bool Controller::has_relative_pointer() const noexcept {
+    if (!_impl) return false;
+    if (_impl->x11) return true;
+    return _impl->device.has_relative_pointer();
+}
+
 result<void> Controller::press_drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const {
     if (!has_pointer()) return code(errc::feature_not_implemented);
     return _impl->pointer.press_drag(from, to, hold);
@@ -672,6 +729,23 @@ result<void> Controller::pointer_up(PointerButton button) const {
     if (!has_pointer()) return code(errc::feature_not_implemented);
     return _impl->x11 ? _impl->x11_device.pointer_up(button) : _impl->device.pointer_up(button);
 }
+
+result<void> Controller::touch_down(int32_t contact, cv::Point2d pos) const {
+    if (!_impl || _impl->x11) return code(errc::feature_not_implemented);
+    return _impl->device.touch_down(contact, pos);
+}
+
+result<void> Controller::touch_move(int32_t contact, cv::Point2d pos) const {
+    if (!_impl || _impl->x11) return code(errc::feature_not_implemented);
+    return _impl->device.touch_move(contact, pos);
+}
+
+result<void> Controller::touch_up(int32_t contact) const {
+    if (!_impl || _impl->x11) return code(errc::feature_not_implemented);
+    return _impl->device.touch_up(contact);
+}
+
+bool Controller::has_touch() const noexcept { return _impl && !_impl->x11 && _impl->device.has_touch(); }
 
 result<void> Controller::key(std::string combination, std::chrono::milliseconds hold) const {
     if (!has_keyboard()) return code(errc::feature_not_implemented);
