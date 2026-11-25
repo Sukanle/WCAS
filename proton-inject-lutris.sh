@@ -22,6 +22,8 @@
 #   BRIDGE_WIDTH      — XWayland 桥宽度（默认 1280）
 #   BRIDGE_HEIGHT     — XWayland 桥高度（默认 800）
 #   GPU_ACCELERATED   — 设为 "0" 强制软件渲染（默认 "1"）
+#   GRAPHICS_API      — dxvk / vulkan / opengl；QtWebEngine 启动器建议 opengl
+#                       （DXVK/D3D11 经 WCAS 私有代理会渲染成白屏）
 #   WINEPREFIX        — Wine 前缀路径
 #   STEAM_APP_ID      — Steam AppID（自动从 Steam 环境变量读取）
 #   LOG_DIR           — 日志输出目录（默认 /tmp/agent-seat-logs）

@@ -224,13 +224,17 @@ ctest --test-dir build/Debug --output-on-failure
 
 Lutris 用 `proton-inject-lutris.sh`。
 
-QtWebEngine 启动器（例如鹰角启动器）在 WCAS 私有 Wayland 代理下仍会出现白屏 / 未响应；启动器及其子进程应使用 XWayland：
+QtWebEngine 启动器（例如鹰角启动器）可以走 native Wayland，但需要使用 **WineD3D/OpenGL**；当前 DXVK/D3D11 内容经过 WCAS 私有代理会渲染成空白窗口：
 
 ```sh
+# 推荐：启动器 native Wayland + WineD3D
+./proton-inject.sh "/path/to/Launcher.exe" --transport wayland --graphics-api opengl
+
+# 回退：启动器及子进程走 XWayland
 ./proton-inject.sh "/path/to/Launcher.exe" --transport xwayland
 ```
 
-如果希望游戏本体走 native Wayland，不要依赖启动器拉起的子进程（它会继承 XWayland 环境），而是让 WCAS 直接启动游戏：Arknights 可用 `--profile arknights` 直启。启动器只负责登录/更新。
+如果希望游戏本体走 native Wayland，不要依赖启动器拉起的子进程（它会继承启动器的环境），而是让 WCAS 直接启动游戏：Arknights 可用 `--profile arknights` 直启。启动器只负责登录/更新。
 
 ### 7.2 TOML launch profiles
 

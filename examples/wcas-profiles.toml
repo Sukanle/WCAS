@@ -17,8 +17,8 @@ id = "hypergryph-launcher"
 target = "Hypergryph Launcher"
 type = "launcher"
 mode = "umu"                 # umu-run + Proton
-transport = "xwayland"       # QtWebEngine still renders white through the WCAS private proxy
-graphics = "auto"            # do not force a graphics backend
+transport = "wayland"        # native Wayland works with WineD3D; use "xwayland" only if OpenGL fails
+graphics = "opengl"          # DXVK/D3D11 through the private proxy renders a blank QtWebEngine window
 command = '~/Games/hypergryph/drive_c/Program Files/Hypergryph Launcher/Launcher.exe'
 
 [[profiles]]
