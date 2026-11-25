@@ -265,6 +265,19 @@ result<void> X11InputDevice::rel_drag(cv::Point2d from, cv::Point2d to) const {
 #endif
 }
 
+result<void> X11InputDevice::relative_move(cv::Point2d delta) const {
+#ifdef WCAS_HAVE_XTEST
+    if (!ensure_display()) return code(errc::input_injection_failed);
+    auto *display = static_cast<DisplayHandle *>(display_);
+    XTestFakeRelativeMotionEvent(display, static_cast<int>(delta.x), static_cast<int>(delta.y), CurrentTime);
+    XFlush(display);
+    return boost::outcome_v2::success();
+#else
+    (void)delta;
+    return code(errc::feature_not_implemented);
+#endif
+}
+
 result<void> X11InputDevice::press_drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const {
 #ifdef WCAS_HAVE_XTEST
     auto moved = move(from);

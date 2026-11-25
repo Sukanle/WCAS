@@ -119,6 +119,9 @@ public:
     [[nodiscard]] result<void> scroll(cv::Point2d pos, cv::Point dpos) const;
     [[nodiscard]] result<void> abs_drag(cv::Point2d from, cv::Point2d to) const;
     [[nodiscard]] result<void> rel_drag(cv::Point2d from, cv::Point2d to) const;
+    /// Buttonless relative pointer motion. This does not move the absolute
+    /// cursor; pointer-locked applications consume it as a camera delta.
+    [[nodiscard]] result<void> relative_move(cv::Point2d delta) const;
     /// Press, hold for `hold`, move to `to`, then release. A zero hold behaves
     /// like `abs_drag`.
     [[nodiscard]] result<void> press_drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const;

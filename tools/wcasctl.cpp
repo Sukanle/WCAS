@@ -40,6 +40,7 @@ void usage() {
                  "  frames-unsubscribe         stop continuous SDM frame publishing\n"
                  "  frames-status              show SDM publisher status\n"
                  "  move X Y                   move the pointer\n"
+                 "  relative DX DY             buttonless relative pointer motion\n"
                  "  click X Y                  click at frame coordinates\n"
                  "  down X Y [BUTTON]          press a pointer button (left|right|middle)\n"
                  "  up [BUTTON]                release a pointer button\n"
@@ -254,6 +255,11 @@ int main(int argc, char **argv) {
         params["x"] = std::stod(arguments[1]);
         params["y"] = std::stod(arguments[2]);
         has_params = true;
+    } else if (command == "relative" && arguments.size() >= 3) {
+        rpc_method = "pointer.relative";
+        params["dx"] = std::stod(arguments[1]);
+        params["dy"] = std::stod(arguments[2]);
+        has_params = true;
     } else if (command == "down" && arguments.size() >= 3) {
         rpc_method = "pointer.down";
         params["x"] = std::stod(arguments[1]);
@@ -303,7 +309,8 @@ int main(int argc, char **argv) {
                && command != "up"
                && command != "drag"
                && command != "key-down"
-               && command != "key-up") {
+               && command != "key-up"
+               && command != "relative") {
         std::cerr << "unknown or incomplete command: " << command << "\n";
         usage();
         return 2;

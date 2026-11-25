@@ -1085,6 +1085,14 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         return ok();
     }
 
+    if (method == "pointer.relative") {
+        const double dx = number("dx", 0.0);
+        const double dy = number("dy", 0.0);
+        auto result = controller_.relative_move({dx, dy});
+        if (!result) return fail(-32'003, error_message(result.error()));
+        return ok();
+    }
+
     if (method == "pointer.down" || method == "pointer.up" || method == "pointer.drag") {
         refresh_frame_size();
         const auto button = [&]() {

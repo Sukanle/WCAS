@@ -434,6 +434,7 @@ wcasctl frames-status                      # 查看持续发布状态/seq
 wcasctl frames-unsubscribe                 # 停止持续发布
 wcasctl click 640 360                      # frame 坐标
 wcasctl move 640 360
+wcasctl relative 20 -10                    # 无按键相对移动（pointer-locked 视角）
 wcasctl down 640 360 left                  # 按下按钮，配合 move/up 做拖拽
 wcasctl up left
 wcasctl drag 640 360 800 500 100           # 按下、移动、释放；最后一个参数是 hold_ms
@@ -449,8 +450,10 @@ socket 默认位于 `$XDG_RUNTIME_DIR/wcas/<pid>.sock`，`latest` 指向最近�
 
 除 `pointer.move` / `pointer.click` / `pointer.scroll` / `key` 外，IPC 还提供面向
 MaaFramework 等控制器的**边沿输入**：`pointer.down`、`pointer.up`、`pointer.drag`、
-`key.down`、`key.up`。`key.down`/`key.up` 会分别保留和释放对应的修饰键，因此可以同时
-存在多个独立的 KeyDown。
+`pointer.relative`、`key.down`、`key.up`。`pointer.relative` 发送无按键的相对指针运动，
+适合 pointer-locked 游戏；目标启用 `zwp_relative_pointer_v1` 时走原生相对事件，
+未启用时回退到基于最后已知位置的绝对移动。
+`key.down`/`key.up` 会分别保留和释放对应的修饰键，因此可以同时存在多个独立的 KeyDown。
 
 截图有两种数据面：
 

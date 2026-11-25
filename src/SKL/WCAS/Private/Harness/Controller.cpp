@@ -74,6 +74,7 @@ public:
     [[nodiscard]] result<void> scroll(cv::Point2d pos, cv::Point2i dpos) const;
     [[nodiscard]] result<void> abs_drag(cv::Point2d from, cv::Point2d to) const;
     [[nodiscard]] result<void> rel_drag(cv::Point2d from, cv::Point2d to) const;
+    [[nodiscard]] result<void> relative_move(cv::Point2d delta) const;
     [[nodiscard]] result<void> press_drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const;
     [[nodiscard]] result<void> pointer_down(cv::Point2d pos, PointerButton button) const;
     [[nodiscard]] result<void> pointer_up(PointerButton button) const;
@@ -98,6 +99,7 @@ private:
 
     ControlledApp *app_ = nullptr;
     ControlledApp::Impl *state_ = nullptr;
+    mutable cv::Point2d last_position_{0.0, 0.0};
     mutable std::vector<HeldChord> held_chords_;
 };
 
@@ -126,6 +128,7 @@ result<void> KeyboardMouseDevice::move(cv::Point2d pos) const {
 
     if (!proxy::inject_pointer_motion(state, lx, ly)) return code(errc::input_injection_failed);
     if (!proxy::inject_pointer_frame(state)) return code(errc::input_injection_failed);
+    last_position_ = pos;
     return boost::outcome_v2::success();
 }
 
@@ -178,6 +181,7 @@ result<void> KeyboardMouseDevice::click(cv::Point2d pos, PointerButton button, u
         }
         if (!proxy::inject_pointer_frame(state)) return code(errc::input_injection_failed);
     }
+    last_position_ = pos;
     return boost::outcome_v2::success();
 }
 
@@ -410,11 +414,24 @@ result<void> KeyboardMouseDevice::drag(cv::Point2d from, cv::Point2d to, std::ch
     if (!proxy::inject_pointer_frame(state)) return code(errc::input_injection_failed);
     if (!proxy::inject_pointer_button(state, 0x110, false)) return code(errc::input_injection_failed);
     if (!proxy::inject_pointer_frame(state)) return code(errc::input_injection_failed);
+    last_position_ = to;
     return boost::outcome_v2::success();
 }
 
 result<void> KeyboardMouseDevice::abs_drag(cv::Point2d from, cv::Point2d to) const {
     return drag(from, to, std::chrono::milliseconds{0});
+}
+
+result<void> KeyboardMouseDevice::relative_move(cv::Point2d delta) const {
+    if (!ensure_session()) return code(errc::input_injection_failed);
+    auto state = session();
+    if (!state) return code(errc::input_injection_failed);
+
+    // Pointer-locked wayland clients get the raw protocol delta. Clients that
+    // do not bind zwp_relative_pointer_v1 fall back to an absolute move from
+    // the last known position, which is still useful for normal desktop apps.
+    if (proxy::inject_relative_motion(state, delta.x, delta.y)) return boost::outcome_v2::success();
+    return move(last_position_ + delta);
 }
 
 result<void> KeyboardMouseDevice::press_drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const {
@@ -634,6 +651,11 @@ result<void> Controller::abs_drag(cv::Point2d from, cv::Point2d to) const {
 result<void> Controller::rel_drag(cv::Point2d from, cv::Point2d to) const {
     if (!has_pointer()) return code(errc::feature_not_implemented);
     return _impl->pointer.rel_drag(from, to);
+}
+
+result<void> Controller::relative_move(cv::Point2d delta) const {
+    if (!has_pointer()) return code(errc::feature_not_implemented);
+    return _impl->x11 ? _impl->x11_device.relative_move(delta) : _impl->device.relative_move(delta);
 }
 
 result<void> Controller::press_drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const {

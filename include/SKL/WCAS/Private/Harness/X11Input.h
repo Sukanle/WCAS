@@ -32,6 +32,7 @@ public:
     [[nodiscard]] result<void> scroll(cv::Point2d pos, cv::Point2i dpos) const;
     [[nodiscard]] result<void> abs_drag(cv::Point2d from, cv::Point2d to) const;
     [[nodiscard]] result<void> rel_drag(cv::Point2d from, cv::Point2d to) const;
+    [[nodiscard]] result<void> relative_move(cv::Point2d delta) const;
     [[nodiscard]] result<void> press_drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const;
     [[nodiscard]] result<void> pointer_down(cv::Point2d pos, PointerButton button) const;
     [[nodiscard]] result<void> pointer_up(PointerButton button) const;
