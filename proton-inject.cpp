@@ -6,10 +6,11 @@
 #include "SKL/WCAS/Private/SDM/Channel.h"
 #include "SKL/WCAS/Private/Harness/ProfileConfig.h"
 
+#include "cmdly/terminal.h"
+
 #include <opencv2/imgcodecs.hpp>
 #include <boost/json.hpp>
 #include <boost/program_options.hpp>
-#include <cmdly/terminal.h>
 #include <fmt/std.h>
 
 #include <algorithm>
@@ -712,6 +713,7 @@ private:
     void capture_screenshot(bool wait_fresh);
 
     // commands
+    void cmd_help(std::istringstream &input);
     void cmd_status(std::istringstream &input);
     void cmd_cursor(std::istringstream &input);
     void cmd_list(std::istringstream &input);
@@ -760,6 +762,8 @@ private:
 
 // clang-format off
 const Shell::CommandSpec Shell::commands_[] = {
+    {"help", &Shell::cmd_help},
+    {"?", &Shell::cmd_help},
     {"status", &Shell::cmd_status},
     {"cursor", &Shell::cmd_cursor},
     {"pxy", &Shell::cmd_cursor},
@@ -1235,6 +1239,7 @@ void Shell::print_startup() const {
         (session_.app.transport() == Transport::xwayland ? "xwayland" : "native"));
     fmt::println("capture-backend set, debug={}, output-dir={}, stale-timeout={}s", options_.debug.describe(),
         options_.output_dir, options_.stale_timeout);
+    fmt::println("type `help` for the command list, `quit` to stop");
 }
 
 // ── frame / cursor bookkeeping ──────────────────────────────────────────────
@@ -1525,6 +1530,41 @@ void Shell::capture_screenshot(bool wait_fresh) {
 }
 
 // ── commands ────────────────────────────────────────────────────────────────
+
+void Shell::cmd_help(std::istringstream &) {
+    struct Entry {
+        const char *usage;
+        const char *description;
+    };
+    static constexpr Entry entries[] = {
+        {                              "status",    "show pid, frame size, counters and the selected target"},
+        {                         "cursor, pxy",               "show the CLI cursor position and its source"},
+        {                   "list, windows, ls",                    "list windows and mark the selected one"},
+        {                            "surfaces",                             "list tracked Wayland surfaces"},
+        {                            "sessions",                           "list connected Wayland sessions"},
+        {         "target, select <index|name>",          "select a target window by index, app_id or title"},
+        {                 "activation <on|off>",           "allow or block activation requests from the app"},
+        {              "monitor, output <name>",              "move the target window to a Hyprland monitor"},
+        {            "screenshot, ss [now|raw]",        "save a PNG; waits for a fresh frame unless now/raw"},
+        {                          "move [x y]",      "move the pointer, defaulting to the current position"},
+        {                      "drag <dx> <dy>",         "relative pointer motion without pressing a button"},
+        {                         "click [x y]",                    "click at the current or given position"},
+        {       "click <hold> <dir> [distance]", "press, drag and release; dir = Top/Down/Left/Right/Center"},
+        {"up, w / down, s / left, a / right, d",                "nudge the pointer by 8% of the window size"},
+        {                           "center, c",                     "move the pointer to the window center"},
+        {  "key, press, k <combination> [hold]",   "press a key or chord, e.g. `key ctrl+s`, `key Space 3s`"},
+        {                         "escape, esc",                                              "press Escape"},
+        {                         "type <text>",                          "type text into the target window"},
+        {                     "testdmabuf [fd]",        "probe tracked or explicit DMA-BUF file descriptors"},
+        {                             "help, ?",                                            "show this help"},
+        {                       "quit, exit, q",                   "stop the target app and leave the shell"},
+    };
+
+    fmt::println("commands:");
+    for (const auto &entry : entries)
+        fmt::println("  {:<42} {}", entry.usage, entry.description);
+    fmt::println("type `quit`, `exit` or `q` to leave the shell");
+}
 
 void Shell::cmd_status(std::istringstream &) {
     refresh_frame_size();
