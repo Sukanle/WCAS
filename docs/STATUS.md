@@ -111,6 +111,12 @@
 10. **DMA-BUF 重复导入的 FD 归属**
     - 同一 DMA-BUF 被多次导入时 fd 归属必须唯一，否则导入到错误的 Vulkan 内存。
 
+11. **QtWebEngine 启动器白屏（图形后端）**
+    - 白屏不是 native Wayland 本身，而是 DXVK/D3D11 内容经过私有代理渲染异常；启动器改用 WineD3D/OpenGL 后 native Wayland 正常；
+    - 启动器 profile 使用 `transport = "wayland"` + `graphics = "opengl"`，XWayland 只作为回退；
+    - Endfield 直启 profile 使用 `graphics = "vulkan"`；启动器“强制 DX11”会给游戏附加 `-force-d3d11`，需要原生 Vulkan 时关闭；
+    - 需要“启动器自动拉起 + 子游戏 DXVK”时，使用 per-exe wrapper + AppDefaults，详见 [ADVANCED.md](ADVANCED.md#启动器-wined3d--游戏-dxvkper-exe)。
+
 ## 6. 验证方式
 
 ```sh
