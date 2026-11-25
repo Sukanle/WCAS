@@ -10,7 +10,6 @@ find_package_handle_standard_args(libdrmtap DEFAULT_MSG LIBDRMTAP_INCLUDE_DIR LI
 if(libdrmtap_FOUND AND NOT TARGET libdrmtap::drmtap)
     add_library(libdrmtap::drmtap UNKNOWN IMPORTED)
     set_target_properties(
-        libdrmtap::drmtap
-        PROPERTIES IMPORTED_LOCATION "${LIBDRMTAP_LIBRARY}"
-                   INTERFACE_INCLUDE_DIRECTORIES "${LIBDRMTAP_INCLUDE_DIR}")
+        libdrmtap::drmtap PROPERTIES IMPORTED_LOCATION "${LIBDRMTAP_LIBRARY}" INTERFACE_INCLUDE_DIRECTORIES
+                                     "${LIBDRMTAP_INCLUDE_DIR}")
 endif()

@@ -224,10 +224,11 @@ Health、Target、FrameBus 各自绑定 ABIX provider；`SessionContext` 提供 
 
 EPCD、ABIX、cmdly、libdrmtap 均先通过 `find_package` 查找已安装的包；找不到时由 CMake
 用 `FetchContent` 通过 SSH 自动克隆到依赖目录，默认是源码树下的 `dependencies/`，可用
-`-DWCAS_DEPENDENCIES_DIR=<path>` 覆盖。默认目录中除
-[`dependencies/README.md`](dependencies/README.md) 外全部被 git 忽略，不会进入提交；
-源码树不再包含 `third_party/` 或 git submodule。首次 configure 需要可用 SSH key/agent
-与 GitHub 网络；之后可离线复用同一依赖目录。
+`-DWCAS_DEPENDENCIES_DIR=<path>` 覆盖。依赖按仓库名放入独立子目录（`ABIX/`、
+`EPCD/`、`cmdly/`、`libdrmtap/`），FetchContent 的构建树位于构建目录的 `_deps/`。
+默认目录中除 [`dependencies/README.md`](dependencies/README.md) 外全部被 git 忽略，
+不会进入提交；源码树不再包含 `third_party/` 或 git submodule。首次 configure 需要可用
+SSH key/agent 与 GitHub 网络；之后可离线复用同一依赖目录。
 
 依赖目录、仓库和版本可通过 cache 变量覆盖，例如：
 
@@ -586,7 +587,7 @@ src/SKL/WCAS/
 cmake/
   Dependencies.cmake       find_package / FetchContent 依赖引导（EPCD、ABIX、cmdly、libdrmtap）
   Findlibdrmtap.cmake      已安装 libdrmtap 的查找模块
-dependencies/              CMake 自动克隆的依赖与 FetchContent 构建树（除 README.md 外 git 忽略）
+dependencies/              CMake 自动克隆的依赖源码（按仓库名分目录，除 README.md 外 git 忽略）
 codegen/                   由协议 XML 生成 wire 元数据（构建期执行）
 scripts/                   维护脚本（Markdown reflow 等）
 tests/                     单元测试与协议集成测试（fake Wayland 环境）
