@@ -74,39 +74,39 @@
 以下问题只有真实 compositor / 真实客户端才会暴露，测试环境容易漏掉：
 
 1. **wire 元数据来源错误（根因级）**
-    - libwayland 的 `wl_interface` 是**客户端接口表**，`release`/`destroy` 与相邻 opcode 合并，之后所有 opcode 偏移；
-    - 系统 `wayland.xml` 也不是完整 wire 描述（`wl_registry.bind` 实际是 `bind(name:uint, interface:string, version:uint, id:new_id) = "usun"`）；
-    - 现行方案：构建期由 `codegen/generate_core_wire_meta.py`（`wayland.xml` + `wayland-server-protocol.h`）与 `generate_wire_meta.py`（扩展协议 XML）生成权威表；缺失输入直接 `FATAL_ERROR`，不回退到易漂移的副本。
+   - libwayland 的 `wl_interface` 是**客户端接口表**，`release`/`destroy` 与相邻 opcode 合并，之后所有 opcode 偏移；
+   - 系统 `wayland.xml` 也不是完整 wire 描述（`wl_registry.bind` 实际是 `bind(name:uint, interface:string, version:uint, id:new_id) = "usun"`）；
+   - 现行方案：构建期由 `codegen/generate_core_wire_meta.py`（`wayland.xml` + `wayland-server-protocol.h`）与 `generate_wire_meta.py`（扩展协议 XML）生成权威表；缺失输入直接 `FATAL_ERROR`，不回退到易漂移的副本。
 
 2. **upstream 对象 ID 必须连续**
-    - 真实 Wayland server 用 `wl_map_insert_at` 校验客户端 `new_id` 落在其分配器水位之下；
-    - 高位基址或独立计数器都会漂移被拒；因此 upstream 侧使用**恒等映射**。
+   - 真实 Wayland server 用 `wl_map_insert_at` 校验客户端 `new_id` 落在其分配器水位之下；
+   - 高位基址或独立计数器都会漂移被拒；因此 upstream 侧使用**恒等映射**。
 
 3. **event 的 `new_id` 目标接口**
-    - `wl_data_device.data_offer` 等事件的 `new_id` 目标不在 request 表中；
-    - 需从 XML 的 `new_id` 属性解析，否则角色丢失，native 连接被拆。
+   - `wl_data_device.data_offer` 等事件的 `new_id` 目标不在 request 表中；
+   - 需从 XML 的 `new_id` 属性解析，否则角色丢失，native 连接被拆。
 
 4. **destroy 启发式**
-    - 旧实现把 opcode 0 一律当销毁，而 `wl_pointer.set_cursor` 就是 0；
-    - 现要求方法名恰好是 `destroy` 且不是 `new_id` 方法。
+   - 旧实现把 opcode 0 一律当销毁，而 `wl_pointer.set_cursor` 就是 0；
+   - 现要求方法名恰好是 `destroy` 且不是 `new_id` 方法。
 
 5. **DMA-BUF ioctl ABI**
-    - `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` 的结构体必须用 `u32`/`i32`；
-    - 用 `u64` 会让 `_IOC` 编码变化，内核返回 `ENOTTY` 而非真实“不支持”。
+   - `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` 的结构体必须用 `u32`/`i32`；
+   - 用 `u64` 会让 `_IOC` 编码变化，内核返回 `ENOTTY` 而非真实“不支持”。
 
 6. **坐标空间**
-    - 捕获得到 frame 像素，`wl_pointer` 使用 surface-local 逻辑像素；
-    - 需跟踪 `wp_viewport.set_destination`、`wl_surface.set_buffer_scale`、`wp_fractional_scale_v1` 后换算。
+   - 捕获得到 frame 像素，`wl_pointer` 使用 surface-local 逻辑像素；
+   - 需跟踪 `wp_viewport.set_destination`、`wl_surface.set_buffer_scale`、`wp_fractional_scale_v1` 后换算。
 
 7. **实时性**
-    - 以 `wl_surface.frame` → `wl_callback.done`（“新帧已上屏”）作为屏障，而不是只看 commit 计数。
+   - 以 `wl_surface.frame` → `wl_callback.done`（“新帧已上屏”）作为屏障，而不是只看 commit 计数。
 
 8. **窗口身份链**
-    - `xdg_surface` → `wl_surface` 映射错误、缺少 `surface → toplevel` 反向映射、启发式选择 primary surface，会让主窗口不可见或错选子窗口。
+   - `xdg_surface` → `wl_surface` 映射错误、缺少 `surface → toplevel` 反向映射、启发式选择 primary surface，会让主窗口不可见或错选子窗口。
 
 9. **退出崩溃**
-    - detached 的连接线程在进程退出时访问已释放静态状态 → 段错误；
-    - 现所有连接线程可 join，退出路径显式回收。
+   - detached 的连接线程在进程退出时访问已释放静态状态 → 段错误；
+   - 现所有连接线程可 join，退出路径显式回收。
 
 10. **DMA-BUF 重复导入的 FD 归属**
     - 同一 DMA-BUF 被多次导入时 fd 归属必须唯一，否则导入到错误的 Vulkan 内存。

@@ -1,4 +1,7 @@
 .cache/
+.clice/
+.ruff/
+
 build/
 tmp/
 compile_commands.json

@@ -54,8 +54,7 @@ WCAS 启动游戏进程，并把环境变量 `WAYLAND_DISPLAY` 指向私有 sock
 - `--transport`：`auto` / `wayland` / `xwayland`；
 - Lutris 用 `proton-inject-lutris.sh`。
 
-XWayland bridge 在合成器中会以目标可执行文件命名，而不是固定的
-`org.freedesktop.Xwayland` / `Xwayland on :N`：
+XWayland bridge 在合成器中会以目标可执行文件命名，而不是固定的 `org.freedesktop.Xwayland` / `Xwayland on :N`：
 
 ```text
 class: wcas-<stem>        # 例如 wcas-launcher

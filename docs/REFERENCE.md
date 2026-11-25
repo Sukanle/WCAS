@@ -8,9 +8,9 @@ WCAS 的 C++ 实现以 Rust 版 `agent-seat-linux` 为行为参照。本文提�
 
 - **现象**：游戏崩溃后代理模式不退出。Wine/winewayland 崩溃后 Wayland 连接可能延迟关闭，客户端 `wl_display.disconnect` 未及时到达，代理一直认为连接存活。
 - **对策**：三层存活检测
-    1. Wayland 代理连接状态；
-    2. 子进程存活（`/proc/<pid>` 检查）；
-    3. 渲染停滞检测 —— 用 `wl_surface.commit` 计数判断“进程活着但不再出帧”。
+  1. Wayland 代理连接状态；
+  2. 子进程存活（`/proc/<pid>` 检查）；
+  3. 渲染停滞检测 —— 用 `wl_surface.commit` 计数判断“进程活着但不再出帧”。
 - **对应实现**：`harness/session.cpp`、`harness/computer_use.cpp` 的 native 等待循环与 `total_commit_count()` / `presented_frames()`。
 
 ### Lutris 包装

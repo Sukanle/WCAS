@@ -1,9 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(
-    WCAS
-    VERSION 0.1.0
-    HOMEPAGE_URL "https://github.com/sukanle/WCAS"
-    LANGUAGES CXX)
+project(WCAS VERSION 0.1.0 HOMEPAGE_URL "https://github.com/sukanle/WCAS" LANGUAGES CXX)
 
 # Apache-2.0. The full text lives in LICENSE at the repository root.
 set(WCAS_LICENSE "Apache-2.0")
@@ -104,10 +100,9 @@ if(WAYLAND_CORE_XML AND WAYLAND_PROTOCOLS_DIR)
         set(WCAS_CORE_WIRE_META_CPP "${WCAS_GENERATED_DIR}/core_wire_meta.cpp")
         add_custom_command(
             OUTPUT "${WCAS_CORE_WIRE_META_CPP}"
-            COMMAND
-                "${PYTHON3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/codegen/generate_core_wire_meta.py"
-                "${WAYLAND_CORE_XML}" "${WAYLAND_CORE_INCLUDE_DIR}/wayland-server-protocol.h"
-                "${WCAS_CORE_WIRE_META_CPP}"
+            COMMAND "${PYTHON3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/codegen/generate_core_wire_meta.py"
+                    "${WAYLAND_CORE_XML}" "${WAYLAND_CORE_INCLUDE_DIR}/wayland-server-protocol.h"
+                    "${WCAS_CORE_WIRE_META_CPP}"
             DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/codegen/generate_core_wire_meta.py" "${WCAS_WIRE_META_H}"
                     "${WAYLAND_CORE_XML}" "${WAYLAND_CORE_INCLUDE_DIR}/wayland-server-protocol.h"
             COMMENT "Generating Wayland core wire metadata"
@@ -117,33 +112,24 @@ if(WAYLAND_CORE_XML AND WAYLAND_PROTOCOLS_DIR)
         message(FATAL_ERROR "wayland-server-protocol.h not found; core wire metadata cannot be generated")
     endif()
 else()
-    message(FATAL_ERROR "Wayland protocol XML not found; install the wayland and wayland-protocols "
-                        "development files to generate the proxy's wire metadata")
+    message(
+        FATAL_ERROR "Wayland protocol XML not found; install the wayland and wayland-protocols "
+                    "development files to generate the proxy's wire metadata")
 endif()
 
-set(DRMTAP_HELPER
-    "AUTO"
-    CACHE STRING "Build the confined libdrmtap helper: AUTO, ON, or OFF")
+set(DRMTAP_HELPER "AUTO" CACHE STRING "Build the confined libdrmtap helper: AUTO, ON, or OFF")
 set_property(CACHE DRMTAP_HELPER PROPERTY STRINGS AUTO ON OFF)
-set(DRMTAP_EGL
-    "AUTO"
-    CACHE STRING "Build the libdrmtap EGL backend: AUTO, ON, or OFF")
+set(DRMTAP_EGL "AUTO" CACHE STRING "Build the libdrmtap EGL backend: AUTO, ON, or OFF")
 set_property(CACHE DRMTAP_EGL PROPERTY STRINGS AUTO ON OFF)
 
 function(wcas_meson_feature out_var value)
     string(TOUPPER "${value}" _value)
     if(_value STREQUAL "AUTO")
-        set(${out_var}
-            auto
-            PARENT_SCOPE)
+        set(${out_var} auto PARENT_SCOPE)
     elseif(_value STREQUAL "ON")
-        set(${out_var}
-            enabled
-            PARENT_SCOPE)
+        set(${out_var} enabled PARENT_SCOPE)
     elseif(_value STREQUAL "OFF")
-        set(${out_var}
-            disabled
-            PARENT_SCOPE)
+        set(${out_var} disabled PARENT_SCOPE)
     else()
         message(FATAL_ERROR "${out_var} must be AUTO, ON, or OFF (got '${value}')")
     endif()
@@ -160,20 +146,26 @@ set(DRMTAP_VERSION "0.5.5")
 # and this ExternalProject builds it.
 if(NOT TARGET libdrmtap::drmtap)
     if(NOT DEFINED DRMTAP_SOURCE_DIR OR NOT EXISTS "${DRMTAP_SOURCE_DIR}/meson.build")
-        message(FATAL_ERROR "libdrmtap source is unavailable; install libdrmtap or set "
-                            "WCAS_LIBDRMTAP_REPOSITORY")
+        message(FATAL_ERROR "libdrmtap source is unavailable; install libdrmtap or set " "WCAS_LIBDRMTAP_REPOSITORY")
     endif()
     set(DRMTAP_LIBRARY "${DRMTAP_BUILD_DIR}/libdrmtap.so.${DRMTAP_VERSION}")
-    ExternalProject_Add(
+    externalproject_add(
         wcas-libdrmtap
         SOURCE_DIR "${DRMTAP_SOURCE_DIR}"
-        BINARY_DIR "${DRMTAP_BUILD_DIR}"
-        # Wipe the Meson build tree before setup. Upgrades can move libdrmtap
-        # from third_party/ to dependencies/, and Meson rejects the stale coredata
-        # (it still points at the old source and may not know newer options).
+        BINARY_DIR
+            "${DRMTAP_BUILD_DIR}"
+            # Wipe the Meson build tree before setup. Upgrades can move libdrmtap
+            # from third_party/ to dependencies/, and Meson rejects the stale coredata
+            # (it still points at the old source and may not know newer options).
         CONFIGURE_COMMAND
-            "${MESON_EXECUTABLE}" setup --wipe "<BINARY_DIR>" "<SOURCE_DIR>" --backend=ninja
-            --prefix=${CMAKE_CURRENT_BINARY_DIR}/libdrmtap-prefix -Dhelper=${DRMTAP_HELPER_FEATURE}
+            "${MESON_EXECUTABLE}"
+            setup
+            --wipe
+            "<BINARY_DIR>"
+            "<SOURCE_DIR>"
+            --backend=ninja
+            --prefix=${CMAKE_CURRENT_BINARY_DIR}/libdrmtap-prefix
+            -Dhelper=${DRMTAP_HELPER_FEATURE}
             -Degl=${DRMTAP_EGL_FEATURE}
         BUILD_COMMAND "${MESON_EXECUTABLE}" compile -C "<BINARY_DIR>"
         INSTALL_COMMAND "${MESON_EXECUTABLE}" install -C "<BINARY_DIR>"
@@ -184,43 +176,43 @@ if(NOT TARGET libdrmtap::drmtap)
 
     add_library(libdrmtap::drmtap SHARED IMPORTED GLOBAL)
     set_target_properties(
-        libdrmtap::drmtap
-        PROPERTIES IMPORTED_LOCATION "${DRMTAP_LIBRARY}" INTERFACE_INCLUDE_DIRECTORIES
-                   "${DRMTAP_SOURCE_DIR}/include")
+        libdrmtap::drmtap PROPERTIES IMPORTED_LOCATION "${DRMTAP_LIBRARY}" INTERFACE_INCLUDE_DIRECTORIES
+                                     "${DRMTAP_SOURCE_DIR}/include")
     add_dependencies(libdrmtap::drmtap wcas-libdrmtap)
 endif()
 
 add_library(
-    WCAS SHARED
-    src/SKL/WCAS/Error.cpp
-    src/SKL/WCAS/DRM.cpp
-    src/SKL/WCAS/DMABUF.cpp
-    src/SKL/WCAS/Private/X11Capture.cpp
-    src/SKL/WCAS/Private/XWayland.cpp
-    src/SKL/WCAS/Private/Proxy/Conn.cpp
-    src/SKL/WCAS/Private/Proxy/Input.cpp
-    src/SKL/WCAS/Private/Proxy/Interfaces.cpp
-    src/SKL/WCAS/Private/Proxy/Keymap.cpp
-    src/SKL/WCAS/Private/Proxy/Keysym.cpp
-    src/SKL/WCAS/Private/Proxy/Reactor.cpp
-    src/SKL/WCAS/Private/Proxy/CaptureSlot.cpp
-    src/SKL/WCAS/Private/Proxy/CaptureScheduler.cpp
-    src/SKL/WCAS/Private/Proxy/DMABUF/Vulkan.cpp
-    src/SKL/WCAS/Private/Proxy/DMABUF/EGL.cpp
-    ${WCAS_WIRE_META_SOURCES}
-    src/SKL/WCAS/Private/Harness/Session.cpp
-    src/SKL/WCAS/Private/Harness/ComputerUse.cpp
-    src/SKL/WCAS/Private/Harness/Controller.cpp
-    src/SKL/WCAS/Private/Harness/ProcessHost.cpp
-    src/SKL/WCAS/Private/Harness/FocusBackend.cpp
-    src/SKL/WCAS/Private/Harness/LaunchStrategy.cpp
-    src/SKL/WCAS/Private/Harness/X11Input.cpp
-    src/SKL/WCAS/Private/Harness/HealthMonitor.cpp
-    src/SKL/WCAS/Private/Harness/TargetSelector.cpp
-    src/SKL/WCAS/Private/Harness/CaptureSource.cpp
-    src/SKL/WCAS/Private/Harness/WindowSource.cpp
-    src/SKL/WCAS/Private/Harness/FrameBus.cpp
-    src/SKL/WCAS/Private/Harness/ControlledApp.cpp)
+    WCAS
+    SHARED
+        src/SKL/WCAS/Error.cpp
+        src/SKL/WCAS/DRM.cpp
+        src/SKL/WCAS/DMABUF.cpp
+        src/SKL/WCAS/Private/X11Capture.cpp
+        src/SKL/WCAS/Private/XWayland.cpp
+        src/SKL/WCAS/Private/Proxy/Conn.cpp
+        src/SKL/WCAS/Private/Proxy/Input.cpp
+        src/SKL/WCAS/Private/Proxy/Interfaces.cpp
+        src/SKL/WCAS/Private/Proxy/Keymap.cpp
+        src/SKL/WCAS/Private/Proxy/Keysym.cpp
+        src/SKL/WCAS/Private/Proxy/Reactor.cpp
+        src/SKL/WCAS/Private/Proxy/CaptureSlot.cpp
+        src/SKL/WCAS/Private/Proxy/CaptureScheduler.cpp
+        src/SKL/WCAS/Private/Proxy/DMABUF/Vulkan.cpp
+        src/SKL/WCAS/Private/Proxy/DMABUF/EGL.cpp
+        ${WCAS_WIRE_META_SOURCES}
+        src/SKL/WCAS/Private/Harness/Session.cpp
+        src/SKL/WCAS/Private/Harness/ComputerUse.cpp
+        src/SKL/WCAS/Private/Harness/Controller.cpp
+        src/SKL/WCAS/Private/Harness/ProcessHost.cpp
+        src/SKL/WCAS/Private/Harness/FocusBackend.cpp
+        src/SKL/WCAS/Private/Harness/LaunchStrategy.cpp
+        src/SKL/WCAS/Private/Harness/X11Input.cpp
+        src/SKL/WCAS/Private/Harness/HealthMonitor.cpp
+        src/SKL/WCAS/Private/Harness/TargetSelector.cpp
+        src/SKL/WCAS/Private/Harness/CaptureSource.cpp
+        src/SKL/WCAS/Private/Harness/WindowSource.cpp
+        src/SKL/WCAS/Private/Harness/FrameBus.cpp
+        src/SKL/WCAS/Private/Harness/ControlledApp.cpp)
 add_library(WCAS::WCAS ALIAS WCAS)
 add_library(wcas-ipc STATIC src/SKL/WCAS/Private/IPC/Protocol.cpp src/SKL/WCAS/Private/IPC/Server.cpp)
 target_include_directories(wcas-ipc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -229,36 +221,32 @@ add_library(wcas-sdm STATIC src/SKL/WCAS/Private/SDM/Channel.cpp)
 target_include_directories(wcas-sdm PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(wcas-sdm PUBLIC Boost::system Threads::Threads)
 target_compile_definitions(WCAS PRIVATE WCAS_BUILDING_LIBRARY=1)
-target_include_directories(WCAS PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-                                       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_include_directories(
+    WCAS PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_include_directories(WCAS PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(
     WCAS
     PUBLIC ${OpenCV_LIBS} fmt::fmt ABIX::runtime ${WCAS_EPCD_TARGETS}
-    PRIVATE Boost::filesystem
-            Boost::system
-            PkgConfig::WAYLAND
-            PkgConfig::XKBCOMMON
-            PkgConfig::XCB
-            PkgConfig::VULKAN
-            PkgConfig::LIBURING)
+    PRIVATE
+        Boost::filesystem
+        Boost::system
+        PkgConfig::WAYLAND
+        PkgConfig::XKBCOMMON
+        PkgConfig::XCB
+        PkgConfig::VULKAN
+        PkgConfig::LIBURING)
 target_link_libraries(WCAS PRIVATE libdrmtap::drmtap)
 target_compile_definitions(WCAS PRIVATE WCAS_HAVE_DRMTAP=1)
 if(XTST_FOUND)
     target_compile_definitions(WCAS PRIVATE WCAS_HAVE_XTEST=1)
     target_link_libraries(WCAS PRIVATE PkgConfig::XTST)
 endif()
-if(EGL_FOUND
-   AND GLESV2_FOUND
-   AND GBM_FOUND)
+if(EGL_FOUND AND GLESV2_FOUND AND GBM_FOUND)
     target_compile_definitions(WCAS PRIVATE WCAS_HAVE_EGL=1)
     target_link_libraries(WCAS PRIVATE PkgConfig::EGL PkgConfig::GLESV2 PkgConfig::GBM)
 endif()
 if(WCAS_DRMTAP_FETCHED)
-    set_property(
-        TARGET WCAS
-        APPEND
-        PROPERTY BUILD_RPATH "${DRMTAP_BUILD_DIR}")
+    set_property(TARGET WCAS APPEND PROPERTY BUILD_RPATH "${DRMTAP_BUILD_DIR}")
 endif()
 
 # cmdly is the line editor behind the interactive console of the test harness.
@@ -270,8 +258,9 @@ endif()
 add_executable(wcas-example main.cpp)
 target_link_libraries(wcas-example PRIVATE WCAS::WCAS)
 add_executable(proton-inject proton-inject.cpp src/SKL/WCAS/Private/Harness/ProfileConfig.cpp)
-target_link_libraries(proton-inject PRIVATE WCAS::WCAS wcas-ipc wcas-sdm Boost::program_options
-                                             ${WCAS_CMDLY_TARGET} tomlplusplus::tomlplusplus)
+target_link_libraries(
+    proton-inject PRIVATE WCAS::WCAS wcas-ipc wcas-sdm Boost::program_options ${WCAS_CMDLY_TARGET}
+                          tomlplusplus::tomlplusplus)
 add_executable(wcasctl tools/wcasctl.cpp)
 target_link_libraries(wcasctl PRIVATE wcas-ipc wcas-sdm)
 install(TARGETS wcasctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

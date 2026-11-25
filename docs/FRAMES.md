@@ -76,12 +76,12 @@ ControlledApp::capture()  (调用方线程)
 
 ## 3. 背压策略
 
-| `SinkOverflow` | 行为 | 适用 |
-|---|---|---|
-| `LatestOnly` | 只保留最新一帧，旧帧丢弃 | 预览、实时推理 |
-| `DropOldest` | 队列满时丢最旧 | 录制、推流 |
-| `DropNewest` | 队列满时拒绝新帧 | 有积压时先不接 |
-| `BlockWithTimeout` | 限时等待队列空间 | 明确允许 capture 短暂等待 |
+| `SinkOverflow`     | 行为                     | 适用                      |
+| ------------------ | ------------------------ | ------------------------- |
+| `LatestOnly`       | 只保留最新一帧，旧帧丢弃 | 预览、实时推理            |
+| `DropOldest`       | 队列满时丢最旧           | 录制、推流                |
+| `DropNewest`       | 队列满时拒绝新帧         | 有积压时先不接            |
+| `BlockWithTimeout` | 限时等待队列空间         | 明确允许 capture 短暂等待 |
 
 `capacity` 对应 `DropOldest` / `DropNewest` / `BlockWithTimeout`；`timeout_ms` 对应 `BlockWithTimeout`。`LatestOnly` 忽略 `capacity`。
 
