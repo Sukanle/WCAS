@@ -74,7 +74,26 @@ int main() {
     assert(!asio_error);
     assert(response.as_object().at("error").as_object().at("code").as_int64() == -32'601);
 
+    // A second connection must be served while the first remains open.
+    ipc::local_socket second(io);
+    second.connect(boost::asio::local::stream_protocol::endpoint(socket_path.string()), asio_error);
+    assert(!asio_error);
+
+    request = boost::json::object{
+        {"jsonrpc",                              "2.0"},
+        {     "id",                                  3},
+        { "method",                             "echo"},
+        { "params", boost::json::object{{"value", 99}}}
+    };
+    assert(ipc::write_message(second, request, asio_error));
+    assert(!asio_error);
+    assert(ipc::read_message(second, response, asio_error));
+    assert(!asio_error);
+    assert(response.as_object().at("id").as_int64() == 3);
+    assert(response.as_object().at("result").as_object().at("echo").as_int64() == 99);
+
     client.close();
+    second.close();
     server.stop();
     assert(!std::filesystem::exists(socket_path));
 

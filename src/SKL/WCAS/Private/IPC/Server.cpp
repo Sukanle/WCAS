@@ -16,6 +16,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace skl::wcas::ipc {
 
@@ -105,6 +106,17 @@ bool IpcServer::start(std::string &error) {
     return true;
 }
 
+void IpcServer::reap_finished_clients_locked() {
+    for (auto it = clients_.begin(); it != clients_.end();) {
+        if (it->done && it->done->load(std::memory_order_acquire)) {
+            if (it->thread.joinable()) it->thread.join();
+            it = clients_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 void IpcServer::run() {
     while (running_.load(std::memory_order_acquire)) {
         auto socket = std::make_shared<local_socket>(*io_);
@@ -118,14 +130,25 @@ void IpcServer::run() {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             continue;
         }
-        {
-            std::lock_guard lock(client_mutex_);
-            client_ = socket;
+        if (!running_.load(std::memory_order_acquire)) {
+            boost::system::error_code ignored;
+            socket->close(ignored);
+            break;
         }
-        serve_client(*socket);
+
+        auto done = std::make_shared<std::atomic<bool>>(false);
+        ClientWorker worker;
+        worker.socket = socket;
+        worker.done = done;
+        worker.thread = std::thread([this, socket, done] {
+            serve_client(*socket);
+            done->store(true, std::memory_order_release);
+        });
+
         {
-            std::lock_guard lock(client_mutex_);
-            client_.reset();
+            std::lock_guard lock(clients_mutex_);
+            reap_finished_clients_locked();
+            clients_.push_back(std::move(worker));
         }
     }
 }
@@ -152,6 +175,7 @@ void IpcServer::serve_client(local_socket &socket) {
         const auto &request_object = request.as_object();
         boost::json::object response;
         try {
+            std::lock_guard lock(handler_mutex_);
             response = handler_(request_object);
         } catch (const std::exception &exception) {
             response = ipc::error(-32'603, exception.what());
@@ -175,13 +199,29 @@ void IpcServer::stop() {
         acceptor_->close(ignored);
     }
     {
-        std::lock_guard lock(client_mutex_);
-        if (client_) {
+        std::lock_guard lock(clients_mutex_);
+        for (auto &client : clients_) {
+            if (!client.socket) continue;
             boost::system::error_code ignored;
-            client_->close(ignored);
+            client.socket->close(ignored);
         }
     }
     if (thread_.joinable()) thread_.join();
+
+    std::vector<ClientWorker> workers;
+    {
+        std::lock_guard lock(clients_mutex_);
+        // A connection may have been accepted just before the acceptor closed.
+        for (auto &client : clients_) {
+            if (!client.socket) continue;
+            boost::system::error_code ignored;
+            client.socket->close(ignored);
+        }
+        workers.swap(clients_);
+    }
+    for (auto &worker : workers) {
+        if (worker.thread.joinable()) worker.thread.join();
+    }
 
     ::unlink(path_.c_str());
     if (owns_latest_) {

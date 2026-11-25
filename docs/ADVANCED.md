@@ -266,7 +266,7 @@ wcasctl type hello
 wcasctl stop                               # 结束受控游戏
 ```
 
-socket 默认位于 `$XDG_RUNTIME_DIR/wcas/<pid>.sock`，`latest` 指向最近会话；连接使用 `SO_PEERCRED` 校验同 UID，目录 0700、socket 0600。协议为长度前缀 JSON。
+socket 默认位于 `$XDG_RUNTIME_DIR/wcas/<pid>.sock`，`latest` 指向最近会话；连接使用 `SO_PEERCRED` 校验同 UID，目录 0700、socket 0600。协议为长度前缀 JSON。IPC 支持多个客户端同时连接；共享会话状态的 handler 调用会串行执行，避免 `frames.subscribe`、截图、输入和目标切换之间的竞争。
 
 除 `pointer.move` / `pointer.click` / `pointer.scroll` / `key` 外，IPC 还提供面向 MaaFramework 等控制器的**边沿输入**：`pointer.down`、`pointer.up`、`pointer.drag`、`pointer.relative`、`key.down`、`key.up`。`pointer.relative` 发送无按键的相对指针运动，适合 pointer-locked 游戏；目标启用 `zwp_relative_pointer_v1` 时走原生相对事件，未启用时回退到基于最后已知位置的绝对移动。`key.down`/`key.up` 会分别保留和释放对应的修饰键，因此可以同时存在多个独立的 KeyDown。
 
