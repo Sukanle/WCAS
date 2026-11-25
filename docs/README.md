@@ -12,5 +12,6 @@
 | [FRAMES.md](FRAMES.md)                 | FrameSink / FrameBus：push 式帧消费、线程模型、背压策略与帧生命周期                                  |
 | [CONTROLLER.md](CONTROLLER.md)         | 非侵入式 Controller 接口：为何选用 ABIX Interface、设备能力拆分、`DeviceInfo`、新增手柄/键盘后端     |
 | [MAA-COMPARISON.md](MAA-COMPARISON.md) | WCAS 与 MAA 现有 Linux 控制器（`MaaLinuxControllerCreate`）的差异、优势与局限                        |
-| [Proton.md](Proton.md)                 | Proton/Wine 游戏自动化集成指南                                                                       |
+| [PROTON.md](PROTON.md)                 | Proton/Wine 游戏自动化集成指南                                                                       |
+| [ADVANCED.md](ADVANCED.md)             | 高级启动设置：图形后端、TOML profiles、CLI、DMA-BUF、IPC、已知问题与项目结构                         |
 | [SECURITY.md](SECURITY.md)             | 安全边界与报告方式                                                                                   |
