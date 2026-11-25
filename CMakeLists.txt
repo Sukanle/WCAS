@@ -262,7 +262,7 @@ target_link_libraries(
     proton-inject PRIVATE WCAS::WCAS wcas-ipc wcas-sdm Boost::program_options ${WCAS_CMDLY_TARGET}
                           tomlplusplus::tomlplusplus)
 add_executable(wcasctl tools/wcasctl.cpp)
-target_link_libraries(wcasctl PRIVATE wcas-ipc wcas-sdm)
+target_link_libraries(wcasctl PRIVATE wcas-ipc wcas-sdm Boost::program_options fmt::fmt)
 install(TARGETS wcasctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 if(BUILD_TESTING)
