@@ -232,7 +232,13 @@ QtWebEngine 启动器（例如鹰角启动器）可以走 native Wayland，但�
 
 # 回退：启动器及子进程走 XWayland
 ./proton-inject.sh "/path/to/Launcher.exe" --transport xwayland
+
+# 如果仍希望由启动器自己启动游戏，可尝试其他图形后端
+./proton-inject.sh "/path/to/Launcher.exe" --transport wayland --graphics-api vk
+./proton-inject.sh "/path/to/Launcher.exe" --transport wayland --graphics-api gl
 ```
+
+如果想让启动器继续负责启动游戏，可以自行尝试 `vk`（游戏原生 Vulkan）或 `gl`（WineD3D）作为启动后端；**推荐优先尝试 `gl`**，因为大部分游戏厂商的启动器基于 QtWebEngine，而 DXVK/D3D11 内容经过 WCAS 私有代理时容易白屏。某一种后端出现白屏或黑屏时，切换到另一种再试；两者都不行再回退 `--transport xwayland`。
 
 如果希望游戏本体走 native Wayland，不要依赖启动器拉起的子进程（它会继承启动器的环境），而是让 WCAS 直接启动游戏：Arknights 可用 `--profile arknights` 直启。启动器只负责登录/更新。
 
