@@ -434,13 +434,23 @@ wcasctl frames-status                      # 查看持续发布状态/seq
 wcasctl frames-unsubscribe                 # 停止持续发布
 wcasctl click 640 360                      # frame 坐标
 wcasctl move 640 360
+wcasctl down 640 360 left                  # 按下按钮，配合 move/up 做拖拽
+wcasctl up left
+wcasctl drag 640 360 800 500 100           # 按下、移动、释放；最后一个参数是 hold_ms
 wcasctl key ctrl+a
+wcasctl key-down Control                   # 保持按下，配合 key-up 做 KeyDown/KeyUp
+wcasctl key-up Control
 wcasctl type hello
 wcasctl stop                               # 结束受控游戏
 ```
 
 socket 默认位于 `$XDG_RUNTIME_DIR/wcas/<pid>.sock`，`latest` 指向最近会话；连接使用
 `SO_PEERCRED` 校验同 UID，目录 0700、socket 0600。协议为长度前缀 JSON。
+
+除 `pointer.move` / `pointer.click` / `pointer.scroll` / `key` 外，IPC 还提供面向
+MaaFramework 等控制器的**边沿输入**：`pointer.down`、`pointer.up`、`pointer.drag`、
+`key.down`、`key.up`。`key.down`/`key.up` 会分别保留和释放对应的修饰键，因此可以同时
+存在多个独立的 KeyDown。
 
 截图有两种数据面：
 

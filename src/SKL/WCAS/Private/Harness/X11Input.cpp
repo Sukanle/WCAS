@@ -4,6 +4,7 @@
 #include <thread>
 #include <vector>
 #include <algorithm>
+#include <iterator>
 #include <string_view>
 
 #include "SKL/WCAS/Error.h"
@@ -185,12 +186,16 @@ result<void> X11InputDevice::move(cv::Point2d pos) const {
 #endif
 }
 
+unsigned int X11InputDevice::native_button(PointerButton button) const {
+    return button == PointerButton::right ? 3u : button == PointerButton::middle ? 2u : 1u;
+}
+
 result<void> X11InputDevice::click(cv::Point2d pos, PointerButton button, uint64_t count) const {
 #ifdef WCAS_HAVE_XTEST
     auto moved = move(pos);
     if (!moved) return moved;
     auto *display = static_cast<DisplayHandle *>(display_);
-    const unsigned int native = button == PointerButton::right ? 3u : button == PointerButton::middle ? 2u : 1u;
+    const unsigned int native = native_button(button);
     for (uint64_t i = 0; i < count; ++i) {
         XTestFakeButtonEvent(display, native, True, CurrentTime);
         XTestFakeButtonEvent(display, native, False, CurrentTime);
@@ -280,6 +285,34 @@ result<void> X11InputDevice::press_drag(cv::Point2d from, cv::Point2d to, std::c
 #endif
 }
 
+result<void> X11InputDevice::pointer_down(cv::Point2d pos, PointerButton button) const {
+#ifdef WCAS_HAVE_XTEST
+    auto moved = move(pos);
+    if (!moved) return moved;
+    auto *display = static_cast<DisplayHandle *>(display_);
+    XTestFakeButtonEvent(display, native_button(button), True, CurrentTime);
+    XFlush(display);
+    return boost::outcome_v2::success();
+#else
+    (void)pos;
+    (void)button;
+    return code(errc::feature_not_implemented);
+#endif
+}
+
+result<void> X11InputDevice::pointer_up(PointerButton button) const {
+#ifdef WCAS_HAVE_XTEST
+    if (!ensure_display()) return code(errc::input_injection_failed);
+    auto *display = static_cast<DisplayHandle *>(display_);
+    XTestFakeButtonEvent(display, native_button(button), False, CurrentTime);
+    XFlush(display);
+    return boost::outcome_v2::success();
+#else
+    (void)button;
+    return code(errc::feature_not_implemented);
+#endif
+}
+
 result<void> X11InputDevice::key(std::string combination, std::chrono::milliseconds hold) const {
 #ifdef WCAS_HAVE_XTEST
     if (!ensure_display()) return code(errc::input_injection_failed);
@@ -311,6 +344,63 @@ result<void> X11InputDevice::key(std::string combination, std::chrono::milliseco
 #else
     (void)combination;
     (void)hold;
+    return code(errc::feature_not_implemented);
+#endif
+}
+
+result<void> X11InputDevice::key_down(std::string combination) const {
+#ifdef WCAS_HAVE_XTEST
+    if (!ensure_display()) return code(errc::input_injection_failed);
+    auto *display = static_cast<DisplayHandle *>(display_);
+    const auto parsed = proxy::parse_key_combination(combination);
+    if (parsed.key.empty()) return code(errc::input_injection_failed);
+
+    HeldChord chord;
+    for (const auto &modifier : parsed.modifiers) {
+        const auto keysym = proxy::keysym_for_key(modifier);
+        if (!keysym) return code(errc::input_injection_failed);
+        const auto keycode = static_cast<uint32_t>(XKeysymToKeycode(display, *keysym));
+        if (keycode == 0 || !send_key(keycode, true)) return code(errc::input_injection_failed);
+        chord.modifiers.push_back(keycode);
+    }
+
+    const auto keysym = proxy::keysym_for_key(parsed.key);
+    if (!keysym) return code(errc::input_injection_failed);
+    const auto keycode = static_cast<uint32_t>(XKeysymToKeycode(display, *keysym));
+    if (keycode == 0 || !send_key(keycode, true)) return code(errc::input_injection_failed);
+
+    chord.key = keycode;
+    held_chords_.push_back(std::move(chord));
+    return boost::outcome_v2::success();
+#else
+    (void)combination;
+    return code(errc::feature_not_implemented);
+#endif
+}
+
+result<void> X11InputDevice::key_up(std::string combination) const {
+#ifdef WCAS_HAVE_XTEST
+    if (!ensure_display()) return code(errc::input_injection_failed);
+    auto *display = static_cast<DisplayHandle *>(display_);
+    const auto parsed = proxy::parse_key_combination(combination);
+    if (parsed.key.empty()) return code(errc::input_injection_failed);
+
+    const auto keysym = proxy::keysym_for_key(parsed.key);
+    if (!keysym) return code(errc::input_injection_failed);
+    const auto keycode = static_cast<uint32_t>(XKeysymToKeycode(display, *keysym));
+    if (keycode == 0 || !send_key(keycode, false)) return code(errc::input_injection_failed);
+
+    const auto chord = std::find_if(
+        held_chords_.rbegin(), held_chords_.rend(), [&](const HeldChord &held) { return held.key == keycode; });
+    if (chord != held_chords_.rend()) {
+        for (auto it = chord->modifiers.rbegin(); it != chord->modifiers.rend(); ++it) {
+            if (!send_key(*it, false)) return code(errc::input_injection_failed);
+        }
+        held_chords_.erase(std::next(chord).base());
+    }
+    return boost::outcome_v2::success();
+#else
+    (void)combination;
     return code(errc::feature_not_implemented);
 #endif
 }

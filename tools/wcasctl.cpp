@@ -41,8 +41,13 @@ void usage() {
                  "  frames-status              show SDM publisher status\n"
                  "  move X Y                   move the pointer\n"
                  "  click X Y                  click at frame coordinates\n"
+                 "  down X Y [BUTTON]          press a pointer button (left|right|middle)\n"
+                 "  up [BUTTON]                release a pointer button\n"
+                 "  drag X1 Y1 X2 Y2 [HOLD_MS] press, move and release at frame coordinates\n"
                  "  scroll X Y DX DY           scroll at frame coordinates\n"
                  "  key COMBO                  inject a key combination (e.g. ctrl+a)\n"
+                 "  key-down COMBO             press and hold a key combination\n"
+                 "  key-up COMBO               release a key combination\n"
                  "  type TEXT                  inject Unicode text\n"
                  "  stop                       stop the controlled app\n";
 }
@@ -249,6 +254,24 @@ int main(int argc, char **argv) {
         params["x"] = std::stod(arguments[1]);
         params["y"] = std::stod(arguments[2]);
         has_params = true;
+    } else if (command == "down" && arguments.size() >= 3) {
+        rpc_method = "pointer.down";
+        params["x"] = std::stod(arguments[1]);
+        params["y"] = std::stod(arguments[2]);
+        if (arguments.size() >= 4) params["button"] = arguments[3];
+        has_params = true;
+    } else if (command == "up") {
+        rpc_method = "pointer.up";
+        if (arguments.size() >= 2) params["button"] = arguments[1];
+        has_params = true;
+    } else if (command == "drag" && arguments.size() >= 5) {
+        rpc_method = "pointer.drag";
+        params["from_x"] = std::stod(arguments[1]);
+        params["from_y"] = std::stod(arguments[2]);
+        params["to_x"] = std::stod(arguments[3]);
+        params["to_y"] = std::stod(arguments[4]);
+        if (arguments.size() >= 6) params["hold_ms"] = std::stod(arguments[5]);
+        has_params = true;
     } else if (command == "scroll" && arguments.size() >= 5) {
         rpc_method = "pointer.scroll";
         params["x"] = std::stod(arguments[1]);
@@ -259,6 +282,14 @@ int main(int argc, char **argv) {
     } else if (command == "key" && arguments.size() >= 2) {
         params["combo"] = join_arguments(arguments, 1);
         has_params = true;
+    } else if (command == "key-down" && arguments.size() >= 2) {
+        rpc_method = "key.down";
+        params["combo"] = join_arguments(arguments, 1);
+        has_params = true;
+    } else if (command == "key-up" && arguments.size() >= 2) {
+        rpc_method = "key.up";
+        params["combo"] = join_arguments(arguments, 1);
+        has_params = true;
     } else if (command == "type" && arguments.size() >= 2) {
         params["text"] = join_arguments(arguments, 1);
         has_params = true;
@@ -267,7 +298,12 @@ int main(int argc, char **argv) {
                && command != "stop"
                && command != "frames-subscribe"
                && command != "frames-unsubscribe"
-               && command != "frames-status") {
+               && command != "frames-status"
+               && command != "down"
+               && command != "up"
+               && command != "drag"
+               && command != "key-down"
+               && command != "key-up") {
         std::cerr << "unknown or incomplete command: " << command << "\n";
         usage();
         return 2;

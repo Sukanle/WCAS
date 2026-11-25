@@ -6,6 +6,7 @@
 #include <vector>
 #include <utility>
 #include <iterator>
+#include <numeric>
 #include <algorithm>
 
 #include "SKL/WCAS/Error.h"
@@ -74,18 +75,30 @@ public:
     [[nodiscard]] result<void> abs_drag(cv::Point2d from, cv::Point2d to) const;
     [[nodiscard]] result<void> rel_drag(cv::Point2d from, cv::Point2d to) const;
     [[nodiscard]] result<void> press_drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const;
+    [[nodiscard]] result<void> pointer_down(cv::Point2d pos, PointerButton button) const;
+    [[nodiscard]] result<void> pointer_up(PointerButton button) const;
 
     // KeyboardController
     [[nodiscard]] result<void> key(std::string combination, std::chrono::milliseconds hold) const;
+    [[nodiscard]] result<void> key_down(std::string combination) const;
+    [[nodiscard]] result<void> key_up(std::string combination) const;
     [[nodiscard]] result<void> type_text(std::string text) const;
 
 private:
     [[nodiscard]] bool ensure_session() const;
     [[nodiscard]] std::shared_ptr<proxy::ConnState> session() const;
     [[nodiscard]] result<void> drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const;
+    [[nodiscard]] static uint32_t native_button(PointerButton button);
+
+    struct HeldChord {
+        uint32_t key = 0;
+        std::vector<uint32_t> modifiers;
+        uint32_t mask = 0;
+    };
 
     ControlledApp *app_ = nullptr;
     ControlledApp::Impl *state_ = nullptr;
+    mutable std::vector<HeldChord> held_chords_;
 };
 
 bool KeyboardMouseDevice::connected() const noexcept {
@@ -165,6 +178,43 @@ result<void> KeyboardMouseDevice::click(cv::Point2d pos, PointerButton button, u
         }
         if (!proxy::inject_pointer_frame(state)) return code(errc::input_injection_failed);
     }
+    return boost::outcome_v2::success();
+}
+
+uint32_t KeyboardMouseDevice::native_button(PointerButton button) {
+    // Linux evdev BTN_ codes: left, right, middle.
+    static constexpr uint32_t button_map[] = {0x110, 0x111, 0x112};
+    const auto index = static_cast<size_t>(button);
+    return index < std::size(button_map) ? button_map[index] : 0;
+}
+
+result<void> KeyboardMouseDevice::pointer_down(cv::Point2d pos, PointerButton button) const {
+    if (!ensure_session()) return code(errc::input_injection_failed);
+    auto state = session();
+    if (!state) return code(errc::input_injection_failed);
+
+    const auto target = input_target(state);
+    if (!target) return code(errc::input_injection_failed);
+    const double lx = to_logical(state, target, pos.x);
+    const double ly = to_logical(state, target, pos.y);
+    if (!proxy::ensure_pointer_focus(state, target, lx, ly)) return code(errc::input_injection_failed);
+    if (!proxy::inject_pointer_motion(state, lx, ly)) return code(errc::input_injection_failed);
+    if (!proxy::inject_pointer_frame(state)) return code(errc::input_injection_failed);
+
+    const auto native = native_button(button);
+    if (!native || !proxy::inject_pointer_button(state, native, true)) return code(errc::input_injection_failed);
+    if (!proxy::inject_pointer_frame(state)) return code(errc::input_injection_failed);
+    return boost::outcome_v2::success();
+}
+
+result<void> KeyboardMouseDevice::pointer_up(PointerButton button) const {
+    if (!ensure_session()) return code(errc::input_injection_failed);
+    auto state = session();
+    if (!state) return code(errc::input_injection_failed);
+
+    const auto native = native_button(button);
+    if (!native || !proxy::inject_pointer_button(state, native, false)) return code(errc::input_injection_failed);
+    if (!proxy::inject_pointer_frame(state)) return code(errc::input_injection_failed);
     return boost::outcome_v2::success();
 }
 
@@ -248,6 +298,83 @@ result<void> KeyboardMouseDevice::key(std::string combination, std::chrono::mill
     }
     if (!held.empty() && !proxy::inject_modifiers(state, 0, 0, 0, 0)) ok = false;
     if (!ok) return code(errc::input_injection_failed);
+    return boost::outcome_v2::success();
+}
+
+result<void> KeyboardMouseDevice::key_down(std::string combination) const {
+    if (!ensure_session()) return code(errc::input_injection_failed);
+    auto state = session();
+    if (!state || !state->keyboard_obj) return code(errc::input_injection_failed);
+
+    const auto surface = input_target(state);
+    if (!surface) return code(errc::input_injection_failed);
+    const auto focus_surface = proxy::keyboard_surface(state, surface);
+
+    const auto parsed = proxy::parse_key_combination(combination);
+    if (parsed.key.empty()) return code(errc::input_injection_failed);
+    const auto keymap_text = proxy::read_keymap_text(*state);
+    if (!keymap_text) return code(errc::input_injection_failed);
+    const auto keymap = proxy::Keymap::parse(*keymap_text);
+    if (!keymap.valid()) return code(errc::input_injection_failed);
+    if (!proxy::ensure_keyboard_focus(state, focus_surface)) return code(errc::input_injection_failed);
+
+    HeldChord chord;
+    for (const auto &name : parsed.modifiers) {
+        const auto xkb_name = proxy::xkb_modifier_name(name);
+        if (!xkb_name) return code(errc::input_injection_failed);
+        const auto mask = keymap.modifier_mask(*xkb_name);
+        const auto keysym = proxy::keysym_for_key(name);
+        if (!mask || !keysym) return code(errc::input_injection_failed);
+        const auto keycode = keymap.find_keysym(*keysym);
+        if (!keycode || !proxy::inject_key_raw(state, *keycode, true)) return code(errc::input_injection_failed);
+        chord.modifiers.push_back(*keycode);
+        chord.mask |= *mask;
+        const uint32_t depressed = std::accumulate(held_chords_.begin(), held_chords_.end(), chord.mask,
+            [](uint32_t value, const HeldChord &held) { return value | held.mask; });
+        if (!proxy::inject_modifiers(state, depressed, 0, 0, 0)) return code(errc::input_injection_failed);
+    }
+
+    const auto keysym = proxy::keysym_for_key(parsed.key);
+    if (!keysym) return code(errc::input_injection_failed);
+    const auto keycode = keymap.find_keysym(*keysym);
+    if (!keycode || !proxy::inject_key_raw(state, *keycode, true)) return code(errc::input_injection_failed);
+
+    chord.key = *keycode;
+    held_chords_.push_back(std::move(chord));
+    return boost::outcome_v2::success();
+}
+
+result<void> KeyboardMouseDevice::key_up(std::string combination) const {
+    if (!ensure_session()) return code(errc::input_injection_failed);
+    auto state = session();
+    if (!state || !state->keyboard_obj) return code(errc::input_injection_failed);
+
+    const auto parsed = proxy::parse_key_combination(combination);
+    if (parsed.key.empty()) return code(errc::input_injection_failed);
+    const auto keymap_text = proxy::read_keymap_text(*state);
+    if (!keymap_text) return code(errc::input_injection_failed);
+    const auto keymap = proxy::Keymap::parse(*keymap_text);
+    if (!keymap.valid()) return code(errc::input_injection_failed);
+
+    const auto keysym = proxy::keysym_for_key(parsed.key);
+    if (!keysym) return code(errc::input_injection_failed);
+    const auto keycode = keymap.find_keysym(*keysym);
+    if (!keycode || !proxy::inject_key_raw(state, *keycode, false)) return code(errc::input_injection_failed);
+
+    // Release the chord that owns this key, not every modifier currently held:
+    // MAA can have several independent KeyDown actions in flight.
+    const auto chord = std::find_if(
+        held_chords_.rbegin(), held_chords_.rend(), [&](const HeldChord &held) { return held.key == *keycode; });
+    uint32_t depressed = 0;
+    if (chord != held_chords_.rend()) {
+        for (auto it = chord->modifiers.rbegin(); it != chord->modifiers.rend(); ++it) {
+            if (!proxy::inject_key_raw(state, *it, false)) return code(errc::input_injection_failed);
+        }
+        held_chords_.erase(std::next(chord).base());
+    }
+    for (const auto &held : held_chords_)
+        depressed |= held.mask;
+    if (!proxy::inject_modifiers(state, depressed, 0, 0, 0)) return code(errc::input_injection_failed);
     return boost::outcome_v2::success();
 }
 
@@ -428,7 +555,8 @@ const InterfaceRegistry<8> &controller_registry() {
 struct Controller::Impl {
     Impl(ControlledApp &app, ControlledApp::Impl *state)
         : device(&app, state)
-        , x11_device(state) {}
+        , x11_device(state)
+        , x11(state->transport == Transport::xwayland) {}
 
     KeyboardMouseDevice device;
     X11InputDevice x11_device;
@@ -436,6 +564,7 @@ struct Controller::Impl {
     KeyboardController keyboard;
     GamepadController gamepad;
     DeviceInfo info;
+    bool x11 = false;
 };
 
 Controller::Controller() noexcept = default;
@@ -512,9 +641,30 @@ result<void> Controller::press_drag(cv::Point2d from, cv::Point2d to, std::chron
     return _impl->pointer.press_drag(from, to, hold);
 }
 
+result<void> Controller::pointer_down(cv::Point2d pos, PointerButton button) const {
+    if (!has_pointer()) return code(errc::feature_not_implemented);
+    return _impl->x11 ? _impl->x11_device.pointer_down(pos, button) : _impl->device.pointer_down(pos, button);
+}
+
+result<void> Controller::pointer_up(PointerButton button) const {
+    if (!has_pointer()) return code(errc::feature_not_implemented);
+    return _impl->x11 ? _impl->x11_device.pointer_up(button) : _impl->device.pointer_up(button);
+}
+
 result<void> Controller::key(std::string combination, std::chrono::milliseconds hold) const {
     if (!has_keyboard()) return code(errc::feature_not_implemented);
     return _impl->keyboard.key(std::move(combination), hold);
+}
+
+result<void> Controller::key_down(std::string combination) const {
+    if (!has_keyboard()) return code(errc::feature_not_implemented);
+    return _impl->x11 ? _impl->x11_device.key_down(std::move(combination))
+                      : _impl->device.key_down(std::move(combination));
+}
+
+result<void> Controller::key_up(std::string combination) const {
+    if (!has_keyboard()) return code(errc::feature_not_implemented);
+    return _impl->x11 ? _impl->x11_device.key_up(std::move(combination)) : _impl->device.key_up(std::move(combination));
 }
 
 result<void> Controller::type_text(std::string text) const {

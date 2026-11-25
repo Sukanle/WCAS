@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <string>
+#include <vector>
 
 #include "SKL/WCAS/Types.h"
 #include "SKL/WCAS/Private/Harness/SessionContext.h"
@@ -32,20 +33,31 @@ public:
     [[nodiscard]] result<void> abs_drag(cv::Point2d from, cv::Point2d to) const;
     [[nodiscard]] result<void> rel_drag(cv::Point2d from, cv::Point2d to) const;
     [[nodiscard]] result<void> press_drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const;
+    [[nodiscard]] result<void> pointer_down(cv::Point2d pos, PointerButton button) const;
+    [[nodiscard]] result<void> pointer_up(PointerButton button) const;
 
     // KeyboardController
     [[nodiscard]] result<void> key(std::string combination, std::chrono::milliseconds hold) const;
+    [[nodiscard]] result<void> key_down(std::string combination) const;
+    [[nodiscard]] result<void> key_up(std::string combination) const;
     [[nodiscard]] result<void> type_text(std::string text) const;
 
 private:
     [[nodiscard]] bool ensure_display() const;
     [[nodiscard]] bool target_origin(int &x, int &y) const;
     [[nodiscard]] bool send_key(uint32_t keycode, bool down) const;
+    [[nodiscard]] unsigned int native_button(PointerButton button) const;
 
     SessionContext *state_ = nullptr;
+    struct HeldChord {
+        uint32_t key = 0;
+        std::vector<uint32_t> modifiers;
+    };
+
     mutable void *display_ = nullptr;   // Display*
     mutable int screen_ = 0;
     mutable unsigned long root_ = 0;
+    mutable std::vector<HeldChord> held_chords_;
 };
 
 }   // namespace skl::wcas

@@ -122,9 +122,17 @@ public:
     /// Press, hold for `hold`, move to `to`, then release. A zero hold behaves
     /// like `abs_drag`.
     [[nodiscard]] result<void> press_drag(cv::Point2d from, cv::Point2d to, std::chrono::milliseconds hold) const;
+    /// Move to `pos` and hold `button` until `pointer_up`.
+    [[nodiscard]] result<void> pointer_down(cv::Point2d pos, PointerButton button = PointerButton::left) const;
+    /// Release `button` previously pressed by `pointer_down`.
+    [[nodiscard]] result<void> pointer_up(PointerButton button = PointerButton::left) const;
 
     // KeyboardController
     [[nodiscard]] result<void> key(std::string combination, std::chrono::milliseconds hold) const;
+    /// Press `combination` and keep it held until `key_up`.
+    [[nodiscard]] result<void> key_down(std::string combination) const;
+    /// Release the keys pressed by the matching `key_down`.
+    [[nodiscard]] result<void> key_up(std::string combination) const;
     [[nodiscard]] result<void> type_text(std::string text) const;
 
     // GamepadController

@@ -1085,6 +1085,51 @@ boost::json::object Shell::handle_ipc(const boost::json::object &request) {
         return ok();
     }
 
+    if (method == "pointer.down" || method == "pointer.up" || method == "pointer.drag") {
+        refresh_frame_size();
+        const auto button = [&]() {
+            const std::string value = text("button");
+            if (value == "right") return PointerButton::right;
+            if (value == "middle") return PointerButton::middle;
+            return PointerButton::left;
+        }();
+        if (method == "pointer.up") {
+            auto result = controller_.pointer_up(button);
+            if (!result) return fail(-32'003, error_message(result.error()));
+            return ok();
+        }
+        if (method == "pointer.drag") {
+            const double from_x = clamp_axis(number("from_x", frame_.width / 2.0), frame_.width);
+            const double from_y = clamp_axis(number("from_y", frame_.height / 2.0), frame_.height);
+            const double to_x = clamp_axis(number("to_x", from_x), frame_.width);
+            const double to_y = clamp_axis(number("to_y", from_y), frame_.height);
+            const auto hold =
+                std::chrono::milliseconds(std::clamp(static_cast<int>(number("hold_ms", 0.0)), 0, 60'000));
+            auto result = controller_.press_drag({from_x, from_y}, {to_x, to_y}, hold);
+            if (!result) return fail(-32'003, error_message(result.error()));
+            mouse_x_ = to_x;
+            mouse_y_ = to_y;
+            cursor_is_device_ = false;
+            return ok();
+        }
+        const double x = clamp_axis(number("x", frame_.width / 2.0), frame_.width);
+        const double y = clamp_axis(number("y", frame_.height / 2.0), frame_.height);
+        auto result = controller_.pointer_down({x, y}, button);
+        if (!result) return fail(-32'003, error_message(result.error()));
+        mouse_x_ = x;
+        mouse_y_ = y;
+        cursor_is_device_ = false;
+        return ok();
+    }
+
+    if (method == "key.down" || method == "key.up") {
+        const std::string combination = text("combo");
+        if (combination.empty()) return fail(-32'602, "missing combo");
+        auto result = method == "key.down" ? controller_.key_down(combination) : controller_.key_up(combination);
+        if (!result) return fail(-32'003, error_message(result.error()));
+        return ok();
+    }
+
     if (method == "key") {
         const std::string combination = text("combo");
         if (combination.empty()) return fail(-32'602, "missing combo");
