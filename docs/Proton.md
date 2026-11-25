@@ -51,7 +51,23 @@ WCAS 启动游戏进程，并把环境变量 `WAYLAND_DISPLAY` 指向私有 sock
 - `--graphics-api`：`dxvk`（默认，DXVK/VKD3D）| `vulkan`（游戏原生 Vulkan，无需 DXVK 转译）| `opengl`（WineD3D）；
 - `--capture-backend`：`dmabuf`（默认）/ `shm` / `kms` / `client`；
 - `--cli`：进入交互命令模式；
+- `--transport`：`auto` / `wayland` / `xwayland`；
 - Lutris 用 `proton-inject-lutris.sh`。
+
+XWayland bridge 在合成器中会以目标可执行文件命名，而不是固定的
+`org.freedesktop.Xwayland` / `Xwayland on :N`：
+
+```text
+class: wcas-<stem>        # 例如 wcas-launcher
+title: <filename>         # 例如 Launcher.exe
+```
+
+Hyprland 可据此只对启动器做浮动/居中规则：
+
+```conf
+windowrulev2 = float, class:^(wcas-launcher)$
+windowrulev2 = center, class:^(wcas-launcher)$
+```
 
 ### 预设环境变量
 

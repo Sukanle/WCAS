@@ -463,6 +463,23 @@ MaaFramework 等控制器的**边沿输入**：`pointer.down`、`pointer.up`、`
 - `frames-subscribe`：后台定时捕获并持续写入同一 ring；`frames-status` 返回
   `running/attempts/writes/errors` 与最新 `seq`，MAA 可自行 `wait_for_frame`。
 
+XWayland bridge 的合成器窗口不再固定显示为 `org.freedesktop.Xwayland` /
+`Xwayland on :N`。WCAS 会把 Xwayland 根 toplevel 的 app_id/title 改写为目标可执行文件名：
+
+```text
+class: wcas-<stem>        # 例如 wcas-launcher
+title: <filename>         # 例如 Launcher.exe
+```
+
+因此可以在 Hyprland 中只对该启动器做规则，例如：
+
+```conf
+windowrulev2 = float, class:^(wcas-launcher)$
+windowrulev2 = center, class:^(wcas-launcher)$
+```
+
+`umu-run` 会使用其第一个游戏参数作为名称来源；普通 `--program` 使用程序路径本身。
+
 键盘注入需要目标窗口获得键盘焦点；若窗口不接收键盘，可在启动时加
 `--allow-activation`，或先用 `move/click` 激活目标窗口。
 

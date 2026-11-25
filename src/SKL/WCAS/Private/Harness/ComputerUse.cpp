@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -70,6 +71,24 @@ std::string escape_regex(const std::string &value) {
     }
     return out;
 }
+
+std::string xwayland_app_id(const std::string &program) {
+    std::string stem = std::filesystem::path(program).stem().string();
+    if (stem.empty()) stem = "application";
+    for (char &c : stem) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (!std::isalnum(byte) && c != '-' && c != '_')
+            c = '-';
+        else
+            c = static_cast<char>(std::tolower(byte));
+    }
+    return "wcas-" + stem;
+}
+
+std::string xwayland_title(const std::string &program) {
+    const std::string name = std::filesystem::path(program).filename().string();
+    return name.empty() ? "wcas-application" : name;
+}
 }   // namespace
 
 struct ComputerUse::Impl {
@@ -84,6 +103,9 @@ struct ComputerUse::Impl {
     std::mutex connection_mutex;
     std::vector<std::thread> connection_threads;
     std::vector<std::shared_ptr<proxy::ConnState>> connection_states;
+    /// Identity applied to the Xwayland root toplevel of the next bridge.
+    std::mutex identity_mutex;
+    std::optional<std::pair<std::string, std::string>> xwayland_identity;
     bool closed = false;
     ~Impl() {
         stopping = true;
@@ -248,6 +270,13 @@ result<ComputerUse> ComputerUse::create() {
             auto session = std::make_shared<proxy::ConnState>();
             session->owner_pid = credentials.pid;
             session->client_fd = client;
+            {
+                std::lock_guard lock(state->identity_mutex);
+                if (state->xwayland_identity) {
+                    session->xwayland_app_id_override = state->xwayland_identity->first;
+                    session->xwayland_title_override = state->xwayland_identity->second;
+                }
+            }
             detail::register_session(credentials.pid, session);
             debug_trace(
                 DebugCategory::Harness, fmt::format("proxy accepted connection pid={} client_fd={} upstream_fd={}",
@@ -281,6 +310,14 @@ void ComputerUse::close() noexcept {
 }
 result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
     if (!impl_ || impl_->closed || config.program_.empty()) return code(errc::process_spawn_failed);
+
+    const std::string identity_program =
+        (std::filesystem::path(config.program_).filename() == "umu-run" && !config.args_.empty()) ? config.args_.front()
+                                                                                                  : config.program_;
+    {
+        std::lock_guard lock(impl_->identity_mutex);
+        impl_->xwayland_identity = std::make_pair(xwayland_app_id(identity_program), xwayland_title(identity_program));
+    }
 
     // Extra matcher for child windows launched later (e.g. a game overlay that
     // lives beside the main exe). Defaults to the program's parent directory;

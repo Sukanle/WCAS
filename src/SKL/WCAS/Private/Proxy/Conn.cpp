@@ -163,6 +163,23 @@ std::string wire_string(const std::vector<char> &msg, size_t at, size_t *next) {
     return std::string(msg.data() + at + 4, strnlen(msg.data() + at + 4, n));
 }
 
+/// Replace the first string argument of a request. Used only for
+/// xdg_toplevel.set_title/set_app_id, whose payload is exactly one string.
+bool replace_wire_string(std::vector<char> &msg, const std::string &value) {
+    if (msg.size() < 12) return false;
+    const auto sender = word(msg.data());
+    const auto opcode = static_cast<uint32_t>(word(msg.data() + 4) & 0XFFFFU);
+    const size_t padded = (value.size() + 1u + 3u) & ~size_t(3u);
+    const size_t new_size = 8u + 4u + padded;
+    if (new_size > 0XFFFFu) return false;
+    msg.assign(new_size, '\0');
+    put_word(msg.data(), sender);
+    put_word(msg.data() + 4, (static_cast<uint32_t>(new_size) << 16) | opcode);
+    put_word(msg.data() + 8, static_cast<uint32_t>(value.size() + 1));
+    std::memcpy(msg.data() + 12, value.c_str(), value.size() + 1);
+    return true;
+}
+
 /// Close every plane fd retained in a DMA-BUF snapshot and mark it empty.
 void release_dmabuf_planes(const std::array<optional<DmaBufPlane>, 4> &planes) {
     for (const auto &plane : planes) {
@@ -530,7 +547,14 @@ bool rewrite(std::vector<char> &msg, bool app_to_upstream, ObjectMap &map, ConnS
         const auto toplevel_it = state.toplevels.find(role_id);
         if (toplevel_it != state.toplevels.end()) {
             size_t str_next = 0;
-            const auto value = wire_string(msg, 8, &str_next);
+            auto value = wire_string(msg, 8, &str_next);
+            if (opcode == 2 && state.xwayland_title_override && value.rfind("Xwayland on ", 0) == 0) {
+                value = *state.xwayland_title_override;
+                if (!replace_wire_string(msg, value)) return false;
+            } else if (opcode == 3 && state.xwayland_app_id_override && value == "org.freedesktop.Xwayland") {
+                value = *state.xwayland_app_id_override;
+                if (!replace_wire_string(msg, value)) return false;
+            }
             if (opcode == 2)
                 toplevel_it->second.title = value;
             else

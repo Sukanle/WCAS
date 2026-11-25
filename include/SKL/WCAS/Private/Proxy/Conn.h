@@ -242,6 +242,11 @@ struct ConnState {
     std::unordered_map<uint32_t, uint32_t> surface_to_parent_surface;
     optional<std::string> capture_app_id;
     optional<std::string> capture_title;
+    /// Optional identity overrides for the Xwayland root toplevel. Xwayland
+    /// hard-codes "org.freedesktop.Xwayland" / "Xwayland on :N"; the proxy
+    /// rewrites those requests so compositor rules can target one session.
+    optional<std::string> xwayland_app_id_override;
+    optional<std::string> xwayland_title_override;
     /// Explicitly selected window surface (app ID). When set, both capture and
     /// input target it instead of the focus/commit heuristics. Used to bring a
     /// later-started child window (e.g. an in-game overlay) under control.
