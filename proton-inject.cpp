@@ -129,7 +129,7 @@ optional<GraphicsApi> parse_graphics_api(const std::string &value) {
 
 optional<LaunchTransport> parse_transport(const std::string &value) {
     if (value == "auto") return LaunchTransport::Auto;
-    if (value == "wayland" || value == "native") return LaunchTransport::NativeWayland;
+    if (value == "wayland" || value == "native") return LaunchTransport::Wayland;
     if (value == "xwayland" || value == "x11") return LaunchTransport::XWayland;
     return std::nullopt;
 }

@@ -9,7 +9,7 @@ int main() {
     auto strategies = launch_strategies();
     assert(strategies.size() >= 2);
     assert(strategies[0].valid());
-    assert(strategies[0].kind() == LaunchKind::NativeWayland);
+    assert(strategies[0].kind() == LaunchKind::Wayland);
     assert(!strategies[0].requires_x11());
     assert(strategies[0].priority() > 0);
     assert(strategies[1].valid());

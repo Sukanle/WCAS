@@ -32,7 +32,7 @@ enum class GraphicsApi : uint8_t {
 /// that render a white, unresponsive window through the Wine Wayland driver.
 enum class LaunchTransport : uint8_t {
     Auto = 0,
-    NativeWayland = 1,
+    Wayland = 1,
     XWayland = 2,
 };
 /// Pointer position reported by the compositor for the app's focused surface

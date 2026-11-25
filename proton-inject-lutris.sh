@@ -139,7 +139,7 @@ run_test() {
     local fallback_timeout="${FALLBACK_TIMEOUT:-120}"
     local content_timeout="${CONTENT_TIMEOUT:-120}"
     local stale_timeout="${STALE_TIMEOUT:-120}"
-    log "超时配置: NativeWayland=${native_timeout}s, XWayland=${fallback_timeout}s, 内容=${content_timeout}s, 停滞=${stale_timeout}s"
+    log "超时配置: Wayland=${native_timeout}s, XWayland=${fallback_timeout}s, 内容=${content_timeout}s, 停滞=${stale_timeout}s"
     cmd+=(
         "--native-timeout" "${native_timeout}"
         "--fallback-timeout" "${fallback_timeout}"

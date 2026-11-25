@@ -782,7 +782,7 @@ else
     log "模式: 原生 Linux"
 fi
 
-log "超时: NativeWayland=${NATIVE_TIMEOUT}s, XWayland=${FALLBACK_TIMEOUT}s, 内容=${CONTENT_TIMEOUT}s"
+log "超时: Wayland=${NATIVE_TIMEOUT}s, XWayland=${FALLBACK_TIMEOUT}s, 内容=${CONTENT_TIMEOUT}s"
 log "桥尺寸: ${BRIDGE_WIDTH}x${BRIDGE_HEIGHT}"
 log "GPU 加速: $(if [[ "${GPU_ACCELERATED}" != "0" ]]; then echo 启用; else echo 禁用; fi)"
 log "图形 API: ${GRAPHICS_API} $(case "${GRAPHICS_API}" in dxvk) echo '(DXVK/VKD3D)';; vulkan) echo '(游戏原生 Vulkan)';; opengl) echo '(WineD3D)';; esac)"

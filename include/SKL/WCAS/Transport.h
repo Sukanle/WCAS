@@ -16,7 +16,7 @@ namespace skl::wcas {
 /// Informational transport identity. `Custom` values are allowed for future
 /// platforms; consumers must query capabilities, not switch on this enum.
 enum class TransportKind : uint32_t {
-    NativeWayland = 0,
+    Wayland = 0,
     XWayland = 1,
     Custom = 0X100,
     Unknown = 0XFFFFFFFF,

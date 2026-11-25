@@ -13,7 +13,7 @@ namespace skl::wcas {
 /// Launch strategy identity. `Custom` is reserved for future transports or
 /// platform launchers; the executor still needs to understand a custom kind.
 enum class LaunchKind : uint32_t {
-    NativeWayland = 0,
+    Wayland = 0,
     XWayland = 1,
     Custom = 0x100,
     Unknown = 0xFFFFFFFF,

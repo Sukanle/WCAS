@@ -18,7 +18,7 @@ using skl::abix::poly::InterfaceStatus;
 class NativeStrategy {
 public:
     [[nodiscard]] std::string name() const { return "native-wayland"; }
-    [[nodiscard]] LaunchKind kind() const { return LaunchKind::NativeWayland; }
+    [[nodiscard]] LaunchKind kind() const { return LaunchKind::Wayland; }
     [[nodiscard]] bool available() const { return true; }
     [[nodiscard]] int32_t priority() const { return 100; }
     [[nodiscard]] bool requires_x11() const { return false; }

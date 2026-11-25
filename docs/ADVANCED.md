@@ -224,7 +224,7 @@ key Alt-C            # 发送 Alt+C
 
 原则是“导入成功 ≠ 像素正确”：Vulkan 路径对未被声明支持的 modifier 会标 `modifier_supported=NO | pixels=unverified`，而不是谎称已验证。
 
-当窗口自身的 buffer 两条路径都无法解码时，`auto` 会**窗口对齐**回退到合成器截图：先用 `swaymsg`/`hyprctl`/`xdotool` 求出窗口矩形，再用 `grim -g`（合成器布局坐标，缩放安全）或 KMS 裁剪读取合成结果，不会返回整屏或多显示器拼接。完整判定与能力查询见 [docs/CAPTURE.md](docs/CAPTURE.md)。
+当窗口自身的 buffer 两条路径都无法解码时，`auto` 会**窗口对齐**回退到合成器截图：先用 `swaymsg`/`hyprctl`/`xdotool` 求出窗口矩形，再用 `grim -g`（合成器布局坐标，缩放安全）或 KMS 裁剪读取合成结果，不会返回整屏或多显示器拼接。完整判定与能力查询见 [CAPTURE.md](CAPTURE.md)。
 
 ### IPC 会话（MAA 接管）
 

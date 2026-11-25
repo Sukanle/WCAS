@@ -450,10 +450,10 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
     skl::epcd::ErrorCode last_error = code(errc::native_wayland_timeout);
     for (const auto &strategy : launch_strategies()) {
         if (!strategy.available()) continue;
-        if (config.transport_ == LaunchTransport::XWayland && strategy.kind() == LaunchKind::NativeWayland) continue;
-        if (config.transport_ == LaunchTransport::NativeWayland && strategy.kind() == LaunchKind::XWayland) continue;
+        if (config.transport_ == LaunchTransport::XWayland && strategy.kind() == LaunchKind::Wayland) continue;
+        if (config.transport_ == LaunchTransport::Wayland && strategy.kind() == LaunchKind::XWayland) continue;
         switch (strategy.kind()) {
-            case LaunchKind::NativeWayland: {
+            case LaunchKind::Wayland: {
                 auto native = attempt(false, "", "", nullptr);
                 if (native) return native;
                 last_error = native.error();
