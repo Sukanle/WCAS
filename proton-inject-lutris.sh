@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# proton-inject.sh — Lutris/Steam 预启动脚本
+# proton-inject-lutris.sh — Lutris/Steam 预启动脚本
 # ============================================================================
 # 将此脚本配置为 Lutris 的"预启动"脚本或 Steam 的"兼容性工具"包装器。
 # 它会启动 wcas 测试控制器，后者会接管游戏进程并执行
@@ -8,13 +8,13 @@
 #
 # 使用方法：
 #   # 1) Lutris 配置 → 系统选项 → 预启动脚本:
-#   #    /path/to/wcas/proton-inject.sh
+#   #    /path/to/wcas/proton-inject-lutris.sh
 #   #
 #   # 2) 命令行直接使用:
-#   #    ./proton-inject.sh /path/to/game.exe --dx11
+#   #    ./proton-inject-lutris.sh /path/to/game.exe --dx11
 #   #
 #   # 3) 环境变量覆盖:
-#   #    NATIVE_TIMEOUT=30 FALLBACK_TIMEOUT=120 ./proton-inject.sh game.exe
+#   #    NATIVE_TIMEOUT=30 FALLBACK_TIMEOUT=120 ./proton-inject-lutris.sh game.exe
 #
 # 环境变量（全部可选）：
 #   NATIVE_TIMEOUT    — Wayland 模式等待超时秒数（默认 30）
@@ -153,10 +153,21 @@ run_test() {
     fi
 
     # 图形 API 后端
-    # Lutris 默认使用 Vulkan (DXVK)，可通过环境变量 GRAPHICS_API 或脚本参数切换
-    local graphics_api="${GRAPHICS_API:-vulkan}"
-    cmd+=("--graphics-api" "${graphics_api}")
-    log "图形 API: ${graphics_api} $(case "${graphics_api}" in vulkan) echo '(DXVK/VKD3D)';; opengl) echo '(WineD3D)';; esac)"
+    # Graphics API is inherited from Lutris by default. Do not override
+    # WINEDLLOVERRIDES for a launcher: forcing native Vulkan disables the
+    # DXVK/d3d11 overrides Lutris set up and breaks QtWebEngine (white or
+    # unresponsive window). Only add --graphics-api when explicitly requested.
+    local graphics_api="${GRAPHICS_API:-}"
+    if [[ -n "${graphics_api}" ]]; then
+        cmd+=("--graphics-api" "${graphics_api}")
+        log "图形 API: ${graphics_api} $(case "${graphics_api}" in
+            dxvk) echo '(DXVK/VKD3D)' ;;
+            vulkan) echo '(游戏原生 Vulkan)' ;;
+            opengl) echo '(WineD3D)' ;;
+        esac)"
+    else
+        log "图形 API: 继承 Lutris 环境（不覆盖 WINEDLLOVERRIDES）"
+    fi
 
     # 只传递 Lutris 已设置的关键环境变量
     # 这些变量用于 configure_native_wayland() 检测 Proton/Wine 模式
@@ -283,10 +294,11 @@ while [[ $# -gt 0 ]]; do
         --graphics-api)
             if [[ -n "${2:-}" ]]; then
                 case "${2}" in
-                    vulkan|vk|dxvk) SCRIPT_GRAPHICS_API="vulkan" ;;
+                    dxvk) SCRIPT_GRAPHICS_API="dxvk" ;;
+                    vulkan|vk) SCRIPT_GRAPHICS_API="vulkan" ;;
                     opengl|gl|wined3d) SCRIPT_GRAPHICS_API="opengl" ;;
                     *)
-                        log "[ERROR] 未知图形 API: ${2}，可选值: vulkan (vk/dxvk), opengl (gl/wined3d)"
+                        log "[ERROR] 未知图形 API: ${2}，可选值: dxvk, vulkan (vk, 原生), opengl (gl/wined3d)"
                         exit 1
                         ;;
                 esac
@@ -326,7 +338,7 @@ while [[ $# -gt 0 ]]; do
             echo "脚本选项:"
             echo "  --inherit-output     继承游戏 stdout/stderr（默认已启用）"
             echo "  --stale-timeout SEC  停滞检测超时秒数（默认 120）"
-            echo "  --graphics-api API   图形 API 后端: vulkan (默认) 或 opengl"
+            echo "  --graphics-api API   图形 API 后端: dxvk, vulkan (原生) 或 opengl（默认继承 Lutris）"
             echo "  --native-timeout SEC Wayland 超时秒数（默认 30）"
             echo "  --fallback-timeout SEC XWayland 超时秒数（默认 120）"
             echo "  --content-timeout SEC 内容超时秒数（默认 120）"

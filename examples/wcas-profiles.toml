@@ -17,7 +17,7 @@ id = "hypergryph-launcher"
 target = "Hypergryph Launcher"
 type = "launcher"
 mode = "umu"                 # umu-run + Proton
-transport = "xwayland"       # QtWebEngine/Wine Wayland is currently white-screen
+transport = "xwayland"       # QtWebEngine still renders white through the WCAS private proxy
 graphics = "auto"            # do not force a graphics backend
 command = '~/Games/hypergryph/drive_c/Program Files/Hypergryph Launcher/Launcher.exe'
 

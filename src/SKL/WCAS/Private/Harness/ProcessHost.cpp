@@ -69,7 +69,18 @@ result<void> ProcessHost::spawn(const ProcessSpec &spec) {
             case GraphicsApi::opengl: ::setenv("PROTON_USE_WINED3D", "1", 1); break;
             case GraphicsApi::vulkan:
                 ::unsetenv("PROTON_USE_WINED3D");
-                ::setenv("WINEDLLOVERRIDES", "d3d9,d3d10core,d3d11,dxgi=n", 1);
+                {
+                    // Preserve overrides inherited from the launcher (DXVK
+                    // d3dcompiler entries, winemenubuilder, ...); only disable
+                    // the D3D modules that this game handles natively.
+                    std::string overrides;
+                    if (const char *existing = ::getenv("WINEDLLOVERRIDES"); existing != nullptr && *existing != '\0') {
+                        overrides = existing;
+                        overrides += ';';
+                    }
+                    overrides += "d3d9,d3d10core,d3d11,dxgi=n";
+                    ::setenv("WINEDLLOVERRIDES", overrides.c_str(), 1);
+                }
                 break;
             case GraphicsApi::dxvk: ::unsetenv("PROTON_USE_WINED3D"); break;
         }
