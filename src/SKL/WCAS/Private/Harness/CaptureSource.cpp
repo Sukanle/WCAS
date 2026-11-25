@@ -107,6 +107,11 @@ result<void> AutoCaptureSource::set_target(std::string app_id, std::string title
 
 result<cv::Mat> AutoCaptureSource::capture_x11() const {
     if (!state_ || !state_->bridge || !state_->bridge->running()) return code(errc::frame_capture_failed);
+    if (state_->selected_target.kind == TargetKind::X11Window && state_->selected_target.value != 0) {
+        auto frame =
+            capture_x11_window(state_->bridge->display(), state_->bridge->xauthority(), state_->selected_target.value);
+        if (frame.has_value()) return cv::Mat{std::move(frame.value())};
+    }
     auto frame = capture_x11_window(state_->bridge->display(), state_->bridge->xauthority());
     if (!frame.has_value()) return code(errc::frame_capture_failed);
     return cv::Mat{std::move(frame.value())};
@@ -181,7 +186,19 @@ result<cv::Mat> AutoCaptureSource::capture() const {
 }
 
 optional<cv::Size> AutoCaptureSource::frame_size() const {
-    if (!state_ || state_->transport == Transport::xwayland) return std::nullopt;
+    if (!state_) return std::nullopt;
+    if (state_->transport == Transport::xwayland) {
+        if (!state_->bridge || !state_->bridge->running()) return std::nullopt;
+        uint64_t target = state_->selected_target.kind == TargetKind::X11Window ? state_->selected_target.value : 0;
+        if (target == 0) {
+            auto selected = x11_default_target(state_->bridge->display(), state_->bridge->xauthority());
+            if (!selected) return std::nullopt;
+            target = selected.value().value;
+        }
+        auto rect = x11_window_rect(state_->bridge->display(), state_->bridge->xauthority(), target);
+        if (!rect) return std::nullopt;
+        return cv::Size{rect.value().width, rect.value().height};
+    }
     return session_frame_size(state_->session);
 }
 

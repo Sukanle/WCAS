@@ -112,6 +112,21 @@ bool X11InputDevice::target_origin(int &x, int &y) const {
     Window parent = 0;
     Window *children = nullptr;
     unsigned int count = 0;
+
+    // Input coordinates are frame-local. The selected X11 target defines that
+    // frame; fall back to the largest window only when no target is selected.
+    if (state_ && state_->selected_target.kind == TargetKind::X11Window && state_->selected_target.value != 0) {
+        int dest_x = 0;
+        int dest_y = 0;
+        Window child = 0;
+        if (XTranslateCoordinates(
+                display, static_cast<Window>(state_->selected_target.value), root_, 0, 0, &dest_x, &dest_y, &child)) {
+            x = dest_x;
+            y = dest_y;
+            return true;
+        }
+    }
+
     if (!XQueryTree(display, root_, &root, &parent, &children, &count)) return false;
 
     Window best = 0;

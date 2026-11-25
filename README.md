@@ -322,7 +322,7 @@ build/Release/proton-inject \
 | `--match-regex, -r`             | 额外的子窗口进程匹配正则（默认取目标程序父目录）                     |
 | `--output`                      | 启动后把窗口移到指定 Hyprland 显示器（如 `DP-2`）                    |
 | `--key-delay`                   | 发送 key 前等待秒数（便于手动聚焦）                                  |
-| `--allow-activation`            | 放行选中窗口的激活请求，使其接收键盘（会夺取焦点）                   |
+| `--allow-activation`            | native Wayland 下放行选中窗口的激活请求，使其接收键盘（会夺取焦点）；XWayland 焦点在私有 bridge 内 |
 | `--debug-all`                   | 打开全部调试类别（等价 `WCAS_DEBUG=1`）                              |
 | `--debug-capture`               | 采集/截图调试（调度器丢弃、槽超时）                                  |
 | `--debug-dmabuf`                | DMA-BUF 导入/回读诊断（`[wcas:dmabuf]`）                             |
@@ -519,8 +519,8 @@ MaaFramework 等控制器的**边沿输入**：`pointer.down`、`pointer.up`、`
   布局，WCAS 会明确拒绝而不是输出花屏。
 - **KMS 抓取**依赖 libdrmtap 与 `CAP_SYS_ADMIN`；作为合成器回退时其裁剪按物理像素，
   输出缩放非 1:1 时可能出现偏移（此时 `grim -g` 优先，因为用的是布局坐标）。
-- **X11 目标捕获/焦点**：XWayland 输入已接入，但按 `TargetId` 选择 X11 窗口捕获、
-  `_NET_ACTIVE_WINDOW` 焦点仍待实现。
+- **X11 焦点**：XWayland 使用私有 bridge 的 `XSetInputFocus`，不会影响真实桌面焦点；
+  不支持通过 `_NET_ACTIVE_WINDOW` 激活真实桌面上的 X11 窗口。
 - 某些应用（如公告层、CEF）会**泄漏大量 surface** 且从不销毁；WCAS 用提交新近度区分活跃窗口，
   但历史 surface 仍会累积。
 - **激活与不抢焦点天生冲突**：要让 Unity/Wine 收键通常需要窗口被激活，而激活会带走用户焦点。

@@ -11,6 +11,7 @@
 #include "SKL/WCAS/Private/Harness/Session.h"
 #include "SKL/WCAS/Private/Harness/FocusBackend.h"
 #include "SKL/WCAS/Private/Harness/ControlledAppImpl.h"
+#include "SKL/WCAS/Private/X11Capture.h"
 #include "SKL/WCAS/Private/Harness/TargetSelector.h"
 
 
@@ -29,10 +30,16 @@ public:
         : state_(state) {}
 
     [[nodiscard]] std::string name() const { return "auto-target"; }
-    [[nodiscard]] bool available() const { return state_ && state_->child > 0; }
+    [[nodiscard]] bool available() const {
+        if (!state_) return false;
+        if (state_->transport == Transport::xwayland) return state_->bridge && state_->bridge->running();
+        return state_->child > 0;
+    }
 
     result<void> select(int32_t index) {
-        if (!state_ || state_->child <= 0) return code(errc::unspecified);
+        if (!state_) return code(errc::unspecified);
+        if (state_->transport == Transport::xwayland) return select_x11(index);
+        if (state_->child <= 0) return code(errc::unspecified);
         int32_t current = 0;
         for (const auto &session : detail::sessions_for(state_->child, state_->match_regex)) {
             const auto windows = proxy::list_windows(session);
@@ -89,7 +96,10 @@ public:
     }
 
     [[nodiscard]] uint32_t selected() const {
-        if (!state_ || !state_->session) return 0;
+        if (!state_) return 0;
+        if (state_->selected_target.kind == TargetKind::X11Window)
+            return static_cast<uint32_t>(state_->selected_target.value);
+        if (!state_->session) return 0;
         return state_->session->preferred_surface;
     }
 
@@ -104,6 +114,7 @@ public:
 
     result<void> select_target(uint64_t value, uint32_t kind) {
         if (!state_ || value == 0) return code(errc::unspecified);
+        if (kind == static_cast<uint32_t>(TargetKind::X11Window)) return select_x11_target(value);
         if (kind != static_cast<uint32_t>(TargetKind::WaylandSurface)) return code(errc::feature_not_implemented);
 
         for (const auto &session : detail::sessions_for(state_->child, state_->match_regex)) {
@@ -138,6 +149,32 @@ public:
     }
 
 private:
+    result<void> select_x11(int32_t index) {
+        if (!state_->bridge || !state_->bridge->running()) return code(errc::xwayland_bridge_failed);
+        if (index < 0) {
+            auto selected = x11_default_target(state_->bridge->display(), state_->bridge->xauthority());
+            if (!selected) return code(errc::unspecified);
+            return select_x11_target(selected.value().value);
+        }
+        const auto windows = list_x11_windows(state_->bridge->display(), state_->bridge->xauthority());
+        if (!windows) return code(errc::unspecified);
+        if (static_cast<size_t>(index) >= windows.value().size()) return code(errc::unspecified);
+        return select_x11_target(windows.value()[static_cast<size_t>(index)].target.value);
+    }
+
+    result<void> select_x11_target(uint64_t value) {
+        if (!state_->bridge || !state_->bridge->running()) return code(errc::xwayland_bridge_failed);
+        const auto windows = list_x11_windows(state_->bridge->display(), state_->bridge->xauthority());
+        if (!windows) return code(errc::unspecified);
+        for (const auto &window : windows.value()) {
+            if (window.target.value != value) continue;
+            state_->selected_target = window.target;
+            if (state_->focus_runtime) (void)state_->focus_runtime->apply();
+            return boost::outcome_v2::success();
+        }
+        return code(errc::unspecified);
+    }
+
     SessionContext *state_ = nullptr;
 };
 

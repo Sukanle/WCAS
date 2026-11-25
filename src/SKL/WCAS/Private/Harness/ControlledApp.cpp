@@ -155,6 +155,7 @@ ControlledApp::ControlledApp(std::unique_ptr<Impl> impl)
         _impl->health = std::make_unique<HealthRuntime>(_impl.get());
         _impl->target = std::make_unique<TargetRuntime>(_impl.get());
         _impl->frames = std::make_unique<FrameBus>();
+        if (_impl->transport == Transport::xwayland) (void)_impl->target->select(-1);
     }
 }
 result<Controller> ControlledApp::controller() {
@@ -275,6 +276,7 @@ bool ControlledApp::frame_pump_running() const noexcept {
 optional<cv::Size> ControlledApp::frame_size() const {
     if (!_impl) return std::nullopt;
     std::lock_guard capture_lock(_impl->capture_mutex);
+    if (_impl->transport == Transport::xwayland) return _impl->capture ? _impl->capture->frame_size() : std::nullopt;
     if (!ensure_active_session_impl(_impl.get())) return std::nullopt;
     auto state = _impl->session;
     std::scoped_lock lock(state->data_mutex);

@@ -320,5 +320,91 @@ auto capture_x11_window(const std::string &display, const std::string &xauthorit
     return fallback;
 }
 
+
+auto capture_x11_window(const std::string &display, const std::string &xauthority, uint64_t window_id)
+    -> result<cv::Mat> {
+    if (window_id == 0) return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::invalid_argument));
+    XcbHandle handle(display, xauthority);
+    if (handle.connection == nullptr) {
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::connection_refused));
+    }
+    cv::Mat image = capture_window(handle.connection, static_cast<xcb_window_t>(window_id));
+    if (image.empty()) return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
+    return boost::outcome_v2::success(std::move(image));
+}
+
+auto x11_window_rect(const std::string &display, const std::string &xauthority, uint64_t window_id)
+    -> result<cv::Rect> {
+    if (window_id == 0) return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::invalid_argument));
+    XcbHandle handle(display, xauthority);
+    if (handle.connection == nullptr) {
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::connection_refused));
+    }
+    auto *connection = handle.connection;
+    const auto *setup = xcb_get_setup(connection);
+    xcb_screen_t *screen = xcb_setup_roots_iterator(setup).data;
+    if (screen == nullptr) return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
+
+    auto *geometry =
+        xcb_get_geometry_reply(connection, xcb_get_geometry(connection, static_cast<xcb_window_t>(window_id)), nullptr);
+    if (geometry == nullptr) return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::invalid_argument));
+    auto *translated = xcb_translate_coordinates_reply(connection,
+        xcb_translate_coordinates(connection, static_cast<xcb_window_t>(window_id), screen->root, 0, 0), nullptr);
+    if (translated == nullptr) {
+        std::free(geometry);
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
+    }
+
+    cv::Rect rect{
+        translated->dst_x,
+        translated->dst_y,
+        static_cast<int>(geometry->width),
+        static_cast<int>(geometry->height),
+    };
+    std::free(translated);
+    std::free(geometry);
+    return boost::outcome_v2::success(rect);
+}
+
+auto x11_focus_window(const std::string &display, const std::string &xauthority, uint64_t window_id) -> result<void> {
+    if (window_id == 0) return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::invalid_argument));
+    XcbHandle handle(display, xauthority);
+    if (handle.connection == nullptr) {
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::connection_refused));
+    }
+    auto *connection = handle.connection;
+    const auto window = static_cast<xcb_window_t>(window_id);
+
+    const uint32_t stack_mode = XCB_STACK_MODE_ABOVE;
+    if (auto *error = xcb_request_check(
+            connection, xcb_configure_window_checked(connection, window, XCB_CONFIG_WINDOW_STACK_MODE, &stack_mode))) {
+        std::free(error);
+    }
+    if (auto *error = xcb_request_check(
+            connection, xcb_set_input_focus_checked(connection, XCB_INPUT_FOCUS_PARENT, window, XCB_CURRENT_TIME))) {
+        std::free(error);
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::io_error));
+    }
+    xcb_flush(connection);
+    return boost::outcome_v2::success();
+}
+
+auto x11_default_target(const std::string &display, const std::string &xauthority) -> result<TargetId> {
+    auto windows = list_x11_windows(display, xauthority);
+    if (!windows) return windows.error();
+    TargetId best{};
+    int64_t best_area = 0;
+    for (const auto &window : windows.value()) {
+        const int64_t area = static_cast<int64_t>(window.width) * window.height;
+        if (area > best_area) {
+            best_area = area;
+            best = window.target;
+        }
+    }
+    if (best.value == 0)
+        return boost::outcome_v2::failure(skl::wcas::from_std_errc(std::errc::no_such_file_or_directory));
+    return boost::outcome_v2::success(best);
+}
+
 }   // namespace wcas
 }   // namespace skl

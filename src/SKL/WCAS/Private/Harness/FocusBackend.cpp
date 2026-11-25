@@ -8,6 +8,7 @@
 #include "SKL/WCAS/Private/Harness/Session.h"
 #include "SKL/WCAS/Private/Harness/FocusBackend.h"
 #include "SKL/WCAS/Private/Harness/ControlledAppImpl.h"
+#include "SKL/WCAS/Private/X11Capture.h"
 
 namespace skl::wcas {
 namespace {
@@ -26,7 +27,11 @@ public:
         : state_(state) {}
 
     [[nodiscard]] std::string name() const { return "auto-focus"; }
-    [[nodiscard]] bool available() const { return state_ && state_->transport != Transport::xwayland; }
+    [[nodiscard]] bool available() const {
+        if (!state_) return false;
+        if (state_->transport == Transport::xwayland) return state_->bridge && state_->bridge->running();
+        return true;
+    }
 
     result<void> set_allowed(bool value) {
         if (!state_) return code(errc::unspecified);
@@ -38,11 +43,25 @@ public:
 
     result<void> apply() {
         if (!state_) return code(errc::unspecified);
+        if (state_->transport == Transport::xwayland) return apply_x11();
         if (state_->child > 0) {
             for (const auto &session : detail::sessions_for(state_->child, state_->match_regex))
                 session->allow_activation = state_->allow_activation && session == state_->session;
         }
         return boost::outcome_v2::success();
+    }
+
+private:
+    result<void> apply_x11() {
+        if (!state_->bridge || !state_->bridge->running()) return code(errc::xwayland_bridge_failed);
+        uint64_t target = state_->selected_target.kind == TargetKind::X11Window ? state_->selected_target.value : 0;
+        if (target == 0) {
+            auto selected = x11_default_target(state_->bridge->display(), state_->bridge->xauthority());
+            if (!selected) return code(errc::unspecified);
+            state_->selected_target = selected.value();
+            target = selected.value().value;
+        }
+        return x11_focus_window(state_->bridge->display(), state_->bridge->xauthority(), target);
     }
 
 private:

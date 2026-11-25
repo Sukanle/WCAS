@@ -40,6 +40,15 @@ int main() {
     assert(app.value().is_alive());
     std::printf("xwayland fallback: app adopted via XWayland bridge (pid=%d)\n", app.value().pid());
 
+    const auto windows = app.value().windows();
+    assert(!windows.empty());
+    assert(app.value().select_window(0).has_value());
+    const auto frame = app.value().capture();
+    assert(frame.has_value() && !frame.value().empty());
+    const auto size = app.value().frame_size();
+    assert(size.has_value() && size->width > 0 && size->height > 0);
+    std::printf("xwayland fallback: target/capture ok (%dx%d)\n", size->width, size->height);
+
     app.value().stop();
     std::printf("xwayland fallback integration: ok\n");
     return 0;

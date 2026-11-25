@@ -76,7 +76,11 @@ result<std::vector<WindowInfo>> AutoWindowProvider::list() const {
     if (!state_) return code(errc::unspecified);
     if (state_->transport != Transport::xwayland) return native_windows(state_);
     if (!state_->bridge || !state_->bridge->running()) return code(errc::xwayland_bridge_failed);
-    return list_x11_windows(state_->bridge->display(), state_->bridge->xauthority());
+    auto windows = list_x11_windows(state_->bridge->display(), state_->bridge->xauthority());
+    if (!windows) return windows.error();
+    for (auto &window : windows.value())
+        window.selected = window.target == state_->selected_target;
+    return windows;
 }
 
 result<cv::Rect> AutoWindowProvider::find_by_pid(int32_t pid) const {
