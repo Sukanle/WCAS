@@ -218,4 +218,5 @@ key Alt-C            # 发送 Alt+C
 ## 相关文档
 
 - [CAPTURE.md](CAPTURE.md) —— DMA-BUF 后端选择、能力协商、合成器回退与计时
-- [README.md](../README.md) —— 项目总览与 CLI 参数
+- [ADVANCED.md](ADVANCED.md) —— 图形后端、原生 Vulkan、per-exe DXVK、TOML profiles 与 CLI 参数
+- [README.md](../README.md) —— 项目总览与快速开始

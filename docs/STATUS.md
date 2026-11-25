@@ -131,4 +131,4 @@ ctest --test-dir build/Debug --output-on-failure
 wine: Call from ... to unimplemented function ntoskrnl.exe.InbvAcquireDisplayOwnership, aborting
 ```
 
-不经 WCAS、直连 `umu-run` 同样出现，根因是腾讯 ACE 反作弊驱动与 Wine/Proton 的 win32 内核接口不兼容。WCAS 侧无法修复，缓解方式是换用已验证的 Proton （GE / Experimental / CachyOS）。详见 [README](../README.md#82-终末地启动偶发退出exit-222)。
+不经 WCAS、直连 `umu-run` 同样出现，根因是腾讯 ACE 反作弊驱动与 Wine/Proton 的 win32 内核接口不兼容。WCAS 侧无法修复，缓解方式是换用已验证的 Proton （GE / Experimental / CachyOS）。详见 [ADVANCED.md](ADVANCED.md#终末地启动偶发退出exit-222)。
