@@ -593,8 +593,7 @@ bool apply_profile(Options &options, const ProfileConfig &config, const LaunchPr
 
         std::string helper = profile.helper;
         if (helper.empty()) {
-            if (const char *env_helper = std::getenv("WCAS_LAUNCH_HELPER"); env_helper != nullptr)
-                helper = env_helper;
+            if (const char *env_helper = std::getenv("WCAS_LAUNCH_HELPER"); env_helper != nullptr) helper = env_helper;
         }
         if (helper.empty()) helper = "wcas-launch-helper.exe";
         helper = expand_profile_path(helper, base);
