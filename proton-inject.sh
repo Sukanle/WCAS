@@ -50,8 +50,8 @@
 #   --native-timeout SEC   Wayland 超时秒数（默认 30）
 #   --fallback-timeout SEC XWayland 回退超时秒数（默认 120）
 #   --content-timeout SEC  内容渲染超时秒数（默认 120）
-#   --bridge-width W       XWayland 桥宽度（默认 1280）
-#   --bridge-height H      XWayland 桥高度（默认 800）
+#   --bridge-width W       XWayland 桥宽度（默认 1920）
+#   --bridge-height H      XWayland 桥高度（默认 1080）
 #   --no-gpu               禁用 GPU 加速
 #   --graphics-api API     图形 API 后端: dxvk (默认) | vulkan (原生) | opengl
 #   --config FILE          TOML launch profile 文件
@@ -128,8 +128,8 @@ debug_args=(
 NATIVE_TIMEOUT="${NATIVE_TIMEOUT:-30}"
 FALLBACK_TIMEOUT="${FALLBACK_TIMEOUT:-120}"
 CONTENT_TIMEOUT="${CONTENT_TIMEOUT:-120}"
-BRIDGE_WIDTH="${BRIDGE_WIDTH:-1280}"
-BRIDGE_HEIGHT="${BRIDGE_HEIGHT:-720}"
+BRIDGE_WIDTH="${BRIDGE_WIDTH:-1920}"
+BRIDGE_HEIGHT="${BRIDGE_HEIGHT:-1080}"
 GPU_ACCELERATED="${GPU_ACCELERATED:-1}"
 GRAPHICS_API="${GRAPHICS_API:-dxvk}"
 TRANSPORT="${TRANSPORT:-auto}"

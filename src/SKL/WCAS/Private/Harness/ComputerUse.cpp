@@ -95,7 +95,7 @@ struct ComputerUse::Impl {
     int socket_fd = -1;
     std::string socket_path, socket_name, runtime, upstream;
     std::chrono::milliseconds native_timeout{8'000}, fallback_timeout{30'000}, content_timeout{30'000};
-    int bridge_width = 1'280, bridge_height = 800;
+    int bridge_width = 1'920, bridge_height = 1'080;
     std::atomic<bool> stopping{false};
     std::thread accept_thread;
     /// Per-connection proxy threads. They are joined on shutdown; leaving them
@@ -463,7 +463,7 @@ result<ControlledApp> ComputerUse::launch(const LaunchConfig &config) const {
             case LaunchKind::XWayland: {
                 if (impl_->fallback_timeout.count() <= 0) continue;
                 auto bridge = std::make_unique<XwaylandBridge>();
-                if (!bridge->start(impl_->socket_name, 5)) {
+                if (!bridge->start(impl_->socket_name, 5, impl_->bridge_width, impl_->bridge_height)) {
                     debug_trace(DebugCategory::Harness, "XWayland bridge start failed");
                     last_error = code(errc::xwayland_bridge_failed);
                     continue;

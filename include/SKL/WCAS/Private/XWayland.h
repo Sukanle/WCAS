@@ -24,7 +24,7 @@ public:
     /// Start Xwayland against `wayland_display`, allocating X display
     /// `display_number` (e.g. 5 for ":5"). Returns false when Xwayland is
     /// unavailable or never becomes reachable.
-    bool start(const std::string &wayland_display, int display_number);
+    bool start(const std::string &wayland_display, int display_number, int width = 1'920, int height = 1'080);
     void stop() noexcept;
 
     [[nodiscard]] bool running() const noexcept { return child_ > 0; }

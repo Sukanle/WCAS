@@ -62,8 +62,9 @@ bool wait_until_serving(const std::string &display, int timeout_ms) {
 
 XwaylandBridge::~XwaylandBridge() { stop(); }
 
-bool XwaylandBridge::start(const std::string &wayland_display, int display_number) {
+bool XwaylandBridge::start(const std::string &wayland_display, int display_number, int width, int height) {
     if (running()) return false;
+    if (width < 160 || height < 120) return false;
     if (::access("/usr/bin/Xwayland", X_OK) != 0 && ::access("/usr/local/bin/Xwayland", X_OK) != 0) {
         return false;
     }
@@ -99,8 +100,9 @@ bool XwaylandBridge::start(const std::string &wayland_display, int display_numbe
                 ::close(fd);
             }
         }
-        ::execlp("Xwayland", "Xwayland", display_.c_str(), "-auth", xauthority_.c_str(), "-noreset",
-            static_cast<char *>(nullptr));
+        const std::string geometry = std::to_string(width) + "x" + std::to_string(height);
+        ::execlp("Xwayland", "Xwayland", display_.c_str(), "-auth", xauthority_.c_str(), "-geometry", geometry.c_str(),
+            "-noreset", static_cast<char *>(nullptr));
         _exit(127);
     }
 
